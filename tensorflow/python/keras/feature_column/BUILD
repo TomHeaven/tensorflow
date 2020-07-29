@@ -8,7 +8,11 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files(["LICENSE"])
+filegroup(
+    name = "all_py_srcs",
+    srcs = glob(["*.py"]),
+    visibility = ["//tensorflow/python/keras/google/private_tf_api_test:__pkg__"],
+)
 
 py_library(
     name = "feature_column",
@@ -83,6 +87,8 @@ tf_py_test(
         "//tensorflow/python/eager:backprop",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/feature_column:feature_column_v2",
+        "//tensorflow/python/keras",
+        "//tensorflow/python/keras:combinations",
     ],
 )
 
@@ -106,6 +112,8 @@ tf_py_test(
         "//tensorflow/python/eager:backprop",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/feature_column:feature_column_v2",
+        "//tensorflow/python/keras",
+        "//tensorflow/python/keras:combinations",
     ],
 )
 
@@ -163,6 +171,7 @@ py_test(
         "//tensorflow/python:variables",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/feature_column:feature_column_v2",
+        "//tensorflow/python/keras:metrics",  # Import it here since base_layer didn't import it due to circular dependency.
         "//tensorflow/python/keras/layers:recurrent",
     ],
 )

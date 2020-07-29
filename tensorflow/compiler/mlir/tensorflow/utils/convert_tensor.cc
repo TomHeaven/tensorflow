@@ -36,8 +36,8 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor.pb.h"
 #include "tensorflow/core/framework/tensor_shape.pb.h"
 #include "tensorflow/core/framework/types.pb.h"
-#include "tensorflow/core/lib/bfloat16/bfloat16.h"
 #include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/platform/bfloat16.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/tstring.h"
@@ -89,12 +89,11 @@ StatusOr<ElementsAttr> ConvertFlatTensor(const Tensor& input_tensor,
 
 ElementsAttr ConvertBf16Tensor(const Tensor& input_tensor,
                                RankedTensorType type) {
-  auto flat = input_tensor.flat<bfloat16>();
-  llvm::SmallVector<llvm::APFloat, 4> floats;
-  floats.reserve(flat.size());
-  for (bfloat16 v : llvm::makeArrayRef(flat.data(), flat.size()))
-    floats.push_back(llvm::APFloat(static_cast<double>(v)));
-  return mlir::DenseElementsAttr::get(type, llvm::makeArrayRef(floats));
+  auto buffer = llvm::makeArrayRef(static_cast<char*>(input_tensor.data()),
+                                   input_tensor.TotalBytes());
+  return mlir::DenseElementsAttr::getFromRawBuffer(
+      type, buffer,
+      /*isSplatBuffer=*/type.getNumElements() == 1);
 }
 
 ElementsAttr ConvertHalfTensor(const Tensor& tensor, RankedTensorType type) {
@@ -162,7 +161,7 @@ StatusOr<ElementsAttr> ConvertTensor(const Tensor& input_tensor,
     default:
       // TODO(shpeisman): restructure code to reuse dialect pointer across
       // calls.
-      auto* dialect = builder->getContext()->getRegisteredDialect("tf");
+      auto* dialect = builder->getContext()->getLoadedDialect("tf");
       return OpaqueElementsAttr::get(dialect, type, MangleTensor(input_tensor));
   }
 
@@ -213,6 +212,20 @@ mlir::TF::ShapeAttr ConvertTypeToTensorShapeAttr(const mlir::Type& type) {
   // If type is not a RankedTensor or UnrankedTensor, it must be a scalar.
   // Empty TensorShape indicates a scalar.
   return mlir::TF::ShapeAttr::get(type.getContext(), ArrayRef<int64_t>());
+}
+
+// Converts the tensor shape proto into an MLIR shape attribute.
+StatusOr<mlir::Attribute> ConvertTensorShapeProto(const TensorShapeProto& shape,
+                                                  mlir::MLIRContext* context) {
+  if (shape.unknown_rank())
+    return mlir::TF::ShapeAttr::get(context, llvm::None);
+
+  llvm::SmallVector<int64_t, 4> dims;
+  dims.reserve(shape.dim().size());
+  for (const auto& dim : shape.dim()) {
+    dims.push_back(dim.size());
+  }
+  return mlir::TF::ShapeAttr::get(context, llvm::makeArrayRef(dims));
 }
 
 // Converts an MLIR dense string elements attribute to a TensorFlow tensor
@@ -280,16 +293,11 @@ void ConvertIntElementsAttr(const mlir::DenseIntElementsAttr attr,
 
 void ConvertBfloat16ElementsAttr(const mlir::DenseFPElementsAttr attr,
                                  protobuf::RepeatedField<int>* output) {
-  // Bfloat16 is internally represented as `double` in MLIR.
   if (attr.isSplat()) {
-    double v = attr.getSplatValue<double>();
-    bfloat16 bf16_val = static_cast<bfloat16>(v);
-    output->Add(absl::bit_cast<int16>(bf16_val));
+    output->Add((*attr.begin()).bitcastToAPInt().getSExtValue());
   } else {
-    for (auto v : attr.getValues<double>()) {
-      bfloat16 bf16_val = static_cast<bfloat16>(v);
-      output->Add(absl::bit_cast<int16>(bf16_val));
-    }
+    for (const llvm::APFloat value : attr.getFloatValues())
+      output->Add(value.bitcastToAPInt().getSExtValue());
   }
 }
 

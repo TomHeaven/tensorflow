@@ -17,8 +17,10 @@ tensorflow::swig::Flatten
 tensorflow::swig::IsSequenceForData
 tensorflow::swig::FlattenForData
 tensorflow::swig::AssertSameStructureForData
+tensorflow::swig::RegisterPyObject
 tensorflow::swig::RegisterType
 tensorflow::swig::IsEagerTensorSlow
+tensorflow::swig::GetRegisteredPyObject
 
 [util_port] # util_port
 tensorflow::IsGoogleCudaEnabled
@@ -82,6 +84,7 @@ tensorflow::Device::attributes
 [device_factory]  # device_lib, tfe, tf_session
 tensorflow::DeviceFactory::AddDevices
 tensorflow::DeviceFactory::ListAllPhysicalDevices
+tensorflow::DeviceFactory::GetAnyDeviceDetails
 
 [session_options]  # device_lib, tfe, tf_session
 tensorflow::SessionOptions::SessionOptions
@@ -97,8 +100,9 @@ tensorflow::data::GrpcDataServerBase::Join
 tensorflow::data::GrpcDataServerBase::Start
 tensorflow::data::GrpcDataServerBase::Stop
 tensorflow::data::GrpcDataServerBase::BoundPort
-tensorflow::data::MasterGrpcDataServer::NumWorkers
-tensorflow::data::NewMasterServer
+tensorflow::data::DispatchGrpcDataServer::NumWorkers
+tensorflow::data::WorkerGrpcDataServer::NumTasks
+tensorflow::data::NewDispatchServer
 tensorflow::data::NewWorkerServer
 
 [protos_all]  # device_lib, dtypes
@@ -119,6 +123,7 @@ toco::TocoConvert
 toco::TocoGetPotentiallySupportedOps
 toco::MlirQuantizeModel
 toco::MlirSparsifyModel
+toco::RegisterCustomOpdefs
 
 [transform_graph_lib] # transform_graph
 tensorflow::graph_transforms::TransformGraph
@@ -201,6 +206,9 @@ TFE_Py_TensorShapeOnDevice
 TFE_Py_EncodeArg
 TFE_Py_EnableInteractivePythonLogging
 TFE_Py_SetEagerContext
+tensorflow::MakeEagerContextThreadLocalData
+tensorflow::GetEagerContextThreadLocalData
+tensorflow::DestroyEagerContextThreadLocalData
 
 [eager_executor] # tfe
 tensorflow::EagerExecutor::~EagerExecutor
@@ -217,6 +225,7 @@ tensorflow::ExperimentalRunPassPipeline
 tensorflow::ExperimentalConvertSavedModelV1ToMlir
 tensorflow::ExperimentalConvertSavedModelToMlir
 tensorflow::ImportGraphDef
+tensorflow::ImportFunction
 
 [op_gen_lib] # tf_session
 tensorflow::ApiDefMap::~ApiDefMap
@@ -323,15 +332,24 @@ tensorflow::grappler::GetNumAvailableLogicalCPUCores
 [traceme_recorder_impl] # profiler
 tensorflow::profiler::TraceMeRecorder::Record
 
-[annotation_stack_impl] # profiler
-tensorflow::profiler::AnnotationStack::ThreadAnnotationStack
-
 [profiler_session_impl] # profiler
 tensorflow::ProfilerSession::Create
 tensorflow::ProfilerSession::CollectData
-tensorflow::ProfilerSession::SerializeToString
 tensorflow::ProfilerSession::Status
 tensorflow::ProfilerSession::~ProfilerSession
+
+[profiler_server_impl] # profiler
+tensorflow::profiler::ProfilerServer::StartProfilerServer
+tensorflow::profiler::ProfilerServer::~ProfilerServer
+
+[profiler_client_impl] # profiler
+tensorflow::profiler::ProfileGrpc
+tensorflow::profiler::NewSessionGrpc
+tensorflow::profiler::MonitorGrpc
+tensorflow::profiler::RemoteProfilerSession::Create
+tensorflow::profiler::RemoteProfilerSession::GetServiceAddress
+tensorflow::profiler::RemoteProfilerSession::WaitForCompletion
+tensorflow::profiler::RemoteProfilerSession::~RemoteProfilerSession
 
 [status_macros] # tfcompile
 xla::status_macros::MakeErrorStream::Impl::Impl
@@ -366,3 +384,19 @@ tensorflow::grappler::CostAnalyzer::GenerateReport
 
 [flags] # tfe
 tensorflow::IsXlaEnabled
+tensorflow::GetMlirCommonFlags
+tensorflow::GetXlaDeviceFlags
+
+[tensor_float_32_utils] # tensor_float_32
+tensorflow::enable_tensor_float_32_execution
+tensorflow::tensor_float_32_execution_enabled
+
+[get_compiler_ir] # tfe
+tensorflow::GetCompilerIr
+stream_executor::port::internal_statusor::Helper::Crash
+
+[tensor_handle] # tfe
+tensorflow::TensorHandle::Tensor
+
+[python_api_dispatcher] # python_api_dispatcher
+tensorflow::PythonAPIDispatcher

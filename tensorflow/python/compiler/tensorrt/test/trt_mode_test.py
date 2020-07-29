@@ -20,7 +20,6 @@ from __future__ import print_function
 
 from unittest import SkipTest  # pylint: disable=g-importing-member
 
-from tensorflow.compiler.tf2tensorrt._pywrap_py_utils import get_linked_tensorrt_version
 from tensorflow.python.compiler.tensorrt.test import tf_trt_integration_test_base as trt_test
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
@@ -40,6 +39,11 @@ class TrtModeTestBase(trt_test.TfTrtIntegrationTestBase):
     q = q + 5.0
     return array_ops.identity(q, name="output_0")
 
+  def ShouldRunTest(self, run_params):
+    # Squeeze op produces dynamic shaped values. Therefore, we don't run the
+    # test with static engine to avoid native segment execution.
+    return (run_params.dynamic_engine, "test dynamic engine only")
+
   def GetParams(self):
     """The input has 1 as a first dimension, which is removed by the squeeze.
 
@@ -55,11 +59,19 @@ class TrtModeTestBase(trt_test.TfTrtIntegrationTestBase):
     return self.BuildParams(self.GraphFn, dtypes.float32, [[1, 12, 5]],
                             [[12, 5]])
 
-  def GetConversionParams(self, run_params, implicit_batch=False):
+  def GetConversionParams(self,
+                          run_params,
+                          max_batch_size=0,
+                          implicit_batch=False):
     """Return a TrtConversionParams for test."""
 
     conversion_params = super(TrtModeTestBase,
                               self).GetConversionParams(run_params)
+    # If max_batch_size!=0, use the value for conversion_params.
+    if max_batch_size and implicit_batch:
+      conversion_params = conversion_params._replace(
+          max_batch_size=max_batch_size)
+
     rewriter_config = self.GetTrtRewriterConfig(
         run_params=run_params,
         conversion_params=conversion_params,
@@ -77,7 +89,10 @@ class ImplicitBatchTest(TrtModeTestBase):
 
   def GetConversionParams(self, run_params):
     """Return a TrtConversionParams for test using implicit batch mdoe."""
-    return super(ImplicitBatchTest, self).GetConversionParams(run_params, True)
+    # The first dimension of the input is squeezed and the batch size for the
+    # rest OPs is 12.
+    return super(ImplicitBatchTest,
+                 self).GetConversionParams(run_params, 12, True)
 
   def ExpectedEnginesToBuild(self, run_params):
     """Check that the expected engine is built.
@@ -110,7 +125,8 @@ class ExplicitBatchTest(TrtModeTestBase):
 
   def GetConversionParams(self, run_params):
     """Return a TrtConversionParams for test that enables explicit batch."""
-    return super(ExplicitBatchTest, self).GetConversionParams(run_params, False)
+    return super(ExplicitBatchTest, self).GetConversionParams(
+        run_params, implicit_batch=False)
 
   def ExpectedEnginesToBuild(self, run_params):
     """Check that the expected engine is built.
@@ -127,8 +143,7 @@ class ExplicitBatchTest(TrtModeTestBase):
 
   def ShouldRunTest(self, run_params):
     # Only run for TRT 6 and above.
-    ver = get_linked_tensorrt_version()
-    return run_params.is_v2 and ver[0] >= 6 and (
+    return run_params.is_v2 and trt_test.IsTensorRTVersionGreaterEqual(6) and (
         not run_params.use_calibration), "test v2, >=TRT6 and non-calibration"
 
 
@@ -164,8 +179,7 @@ class DynamicShapesTest(TrtModeTestBase):
 
   def ShouldRunTest(self, run_params):
     # Only run for TRT 6 and above.
-    ver = get_linked_tensorrt_version()
-    return run_params.is_v2 and ver[0] >= 6 and (
+    return run_params.is_v2 and trt_test.IsTensorRTVersionGreaterEqual(6) and (
         not run_params.use_calibration), "test v2 >=TRT6 and non-calibration"
 
 

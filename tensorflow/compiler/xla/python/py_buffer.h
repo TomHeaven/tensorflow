@@ -32,17 +32,18 @@ namespace xla {
 class PyBuffer {
  public:
   PyBuffer(std::shared_ptr<PyClient> client, std::unique_ptr<PjRtBuffer> buffer,
-           std::unique_ptr<Traceback> traceback);
+           std::shared_ptr<Traceback> traceback);
+  ~PyBuffer();
 
   std::shared_ptr<PyClient> client() const { return client_; }
   PjRtBuffer* buffer() const { return buffer_.get(); }
 
-  ClientAndPtr<Device> device() const;
+  ClientAndPtr<PjRtDevice> device() const;
   const std::string& platform_name() const { return buffer_->platform_name(); }
   bool is_deleted() const { return buffer_->IsDeleted(); }
 
   StatusOr<std::unique_ptr<PyBuffer>> CopyToDevice(
-      const ClientAndPtr<Device>& dst_device) const;
+      const ClientAndPtr<PjRtDevice>& dst_device) const;
 
   void Delete() { return buffer_->Delete(); }
 
@@ -63,9 +64,16 @@ class PyBuffer {
   Traceback* traceback() { return traceback_.get(); }
 
  private:
+  friend class PyClient;
+
   std::shared_ptr<PyClient> client_;
   std::unique_ptr<PjRtBuffer> buffer_;
-  std::unique_ptr<Traceback> traceback_;
+  std::shared_ptr<Traceback> traceback_;
+
+  // Doubly-linked list of all buffers known to the client. Protected by the
+  // GIL.
+  PyBuffer* next_;
+  PyBuffer* prev_;
 };
 
 }  // namespace xla

@@ -105,6 +105,12 @@ class IrEmitter : public DfsHloVisitorWithDefault,
 
   llvm::IRBuilder<>* builder() { return &b_; }
 
+  // Emits constants to generated LLVM IR, and also populate related
+  // inforamtion to ir_emitter_context for large-constant initializations. If
+  // `lookup_indices` is true, the allocation index associated with the constant
+  // is also populated.
+  Status EmitConstants(const HloComputation& computation, bool lookup_indices);
+
  protected:
   // Constructs an IrEmitter with the given IrEmitter context.
   // ir_emitter_context is owned by the caller and should outlive the IrEmitter
@@ -124,8 +130,9 @@ class IrEmitter : public DfsHloVisitorWithDefault,
     return bindings_.GetIrArray(inst, consumer, shape_index);
   }
   // A convenient helper for calling HloToIrBindings::GetBasePointer.
-  llvm::Value* GetBasePointer(const HloInstruction& inst) const {
-    return bindings_.GetBasePointer(inst);
+  llvm::Value* GetBasePointer(const HloInstruction& inst,
+                              ShapeIndexView shape_index = {}) const {
+    return bindings_.GetBasePointer(inst, shape_index);
   }
 
   // Generates the IrArray for each output of an hlo instruction and returns

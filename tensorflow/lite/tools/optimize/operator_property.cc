@@ -15,6 +15,7 @@ limitations under the License.
 #include "tensorflow/lite/tools/optimize/operator_property.h"
 
 #include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/schema/schema_utils.h"
 
 namespace tflite {
 namespace optimize {
@@ -41,8 +42,10 @@ const OpVariant GetOperatorVariant(const ModelT* model, int subgraph_index,
   OpVariant op_variant;
   OperatorT* op =
       model->subgraphs.at(subgraph_index)->operators[op_index].get();
-  op_variant.op_code = model->operator_codes[op->opcode_index]->builtin_code;
-  if (op_variant.op_code == BuiltinOperator_LSTM) {
+  op_variant.op_code =
+      GetBuiltinCode(model->operator_codes[op->opcode_index].get());
+  if (op_variant.op_code == BuiltinOperator_LSTM ||
+      op_variant.op_code == BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_LSTM) {
     if (op->inputs.size() == 5) {
       // The 5 input ("basic") LSTM is not supported in this tooling (yet).
       op_variant.is_quantizable = false;
@@ -70,15 +73,22 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
   BuiltinOperator op_code = op_variant.op_code;
   OperatorProperty property;
   switch (op_code) {
+    case BuiltinOperator_ABS:
+      property.inputs = {{0, {}}};
+      property.outputs = {{0, {}}};
+      property.version = 2;
+      break;
     case BuiltinOperator_ADD:
       property.inputs = {{0, {}}, {1, {}}};
       property.outputs = {{0, {}}};
       property.version = 2;
+      property.quantize_input_as_activations = true;
       break;
     case BuiltinOperator_ARG_MAX:
       property.inputs = {{0, {}}};
       // ArgMax has no quantizable output.
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     case BuiltinOperator_AVERAGE_POOL_2D:
       property.inputs = {{0, {}}};
@@ -86,6 +96,13 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.restrict_same_input_output_scale = true;
       property.version = 2;
       break;
+    case BuiltinOperator_BATCH_MATMUL: {
+      property.inputs = {{0, {}}, {1, {}}};
+      property.outputs = {{0, {}}};
+      property.version = 2;
+      property.quantize_input_as_activations = true;
+      break;
+    }
     case BuiltinOperator_BATCH_TO_SPACE_ND:
     case BuiltinOperator_SPACE_TO_BATCH_ND:
     case BuiltinOperator_SPACE_TO_DEPTH:
@@ -94,6 +111,7 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.outputs = {{0, {}}};
       property.restrict_same_input_output_scale = true;
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     case BuiltinOperator_SPLIT:
       // We skip input 0 since it is the split dim which is not real valued.
@@ -159,6 +177,7 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.inputs = {{0, {}}, {1, {}}};
       // Comparisons have no quantizable outputs.
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     case BuiltinOperator_EXPAND_DIMS:
       // We skip input 1 as it is not real valued (it's the index of axis) and
@@ -180,12 +199,14 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.inputs = {{0, {}}};
       property.outputs = {{0, {}}};
       property.restrict_same_input_output_scale = true;
+      property.quantize_input_as_activations = true;
       property.version = 2;
       break;
     case BuiltinOperator_HARD_SWISH: {
       property.inputs = {{0, {}}};
       property.outputs = {{0, {}}};
       property.version = 1;
+      property.quantizable_int16 = false;
       break;
     }
     case BuiltinOperator_LOG_SOFTMAX: {
@@ -193,9 +214,10 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       // LogSoftmax requires output with 16/256 as scale and 127 as zero point.
       TensorProperty tensor_property;
       tensor_property.restriction = true;
-      tensor_property.restricted_value = {16.0f / 256.0f, 127};
+      tensor_property.restricted_value_int8 = {16.0f / 256.0f, 127};
       property.outputs = {{0, tensor_property}};
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     }
     case BuiltinOperator_LOGISTIC: {
@@ -203,12 +225,14 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       // Logistic requires output with 1/256 as scale and -128 as zero point.
       TensorProperty tensor_property;
       tensor_property.restriction = true;
-      tensor_property.restricted_value = {1 / 256.0f, -128};
+      tensor_property.restricted_value_int8 = {1 / 256.0f, -128};
+      tensor_property.restricted_value_int16 = {1 / 32768.0f, 0};
       property.outputs = {{0, tensor_property}};
       property.version = 2;
       break;
     }
-    case BuiltinOperator_LSTM: {
+    case BuiltinOperator_LSTM:
+    case BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_LSTM: {
       if (!op_variant.is_quantizable) {
         // Early exist for 5 input LSTM.
         // It is not supported in this tooling yet.
@@ -757,6 +781,7 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
         property.restrict_scale = {{18, 0}};
         property.version = 2;
       }
+      property.quantizable_int16 = false;
       break;
     }
     case BuiltinOperator_L2_NORMALIZATION: {
@@ -764,9 +789,10 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       // L2 Norm requires output with 1/128 as scale and 0 as zero point.
       TensorProperty tensor_property;
       tensor_property.restriction = true;
-      tensor_property.restricted_value = {1 / 128.0f, 0};
+      tensor_property.restricted_value_int8 = {1 / 128.0f, 0};
       property.outputs = {{0, tensor_property}};
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     }
     case BuiltinOperator_MAX_POOL_2D:
@@ -779,6 +805,7 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.arbitrary_inputs = true;
       property.outputs = {{0, {}}};
       property.restrict_same_input_output_scale = true;
+      property.quantize_input_as_activations = true;
       property.version = 2;
       break;
     case BuiltinOperator_MEAN:
@@ -790,16 +817,19 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.arbitrary_inputs = true;
       property.outputs = {{0, {}}};
       property.restrict_same_input_output_scale = true;
+      property.quantize_input_as_activations = true;
       property.version = 2;
       break;
     case BuiltinOperator_MUL:
       property.inputs = {{0, {}}, {1, {}}};
       property.outputs = {{0, {}}};
+      property.quantize_input_as_activations = true;
       property.version = 2;
       break;
     case BuiltinOperator_PACK:
       property.arbitrary_inputs = true;
       property.outputs = {{0, {}}};
+      property.restrict_same_input_output_scale = true;
       property.restrict_same_input_output_scale = true;
       property.version = 2;
       break;
@@ -831,11 +861,13 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.inputs = {{0, {}}};
       property.outputs = {{0, {}}};
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     case BuiltinOperator_RELU_N1_TO_1:
       property.inputs = {{0, {}}};
       property.outputs = {{0, {}}};
       property.version = 1;
+      property.quantizable_int16 = false;
       break;
     case BuiltinOperator_RESHAPE:
       property.inputs = {{0, {}}};
@@ -844,6 +876,12 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.version = 1;
       break;
     case BuiltinOperator_RESIZE_BILINEAR:
+      property.inputs = {{0, {}}};
+      property.outputs = {{0, {}}};
+      property.restrict_same_input_output_scale = true;
+      property.version = 2;
+      property.quantizable_int16 = false;
+      break;
     case BuiltinOperator_RESIZE_NEAREST_NEIGHBOR:
       property.inputs = {{0, {}}};
       property.outputs = {{0, {}}};
@@ -874,7 +912,8 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       // Softmax requires output with 1/256 as scale and -128 as zero point.
       TensorProperty tensor_property;
       tensor_property.restriction = true;
-      tensor_property.restricted_value = {1 / 256.0f, -128};
+      tensor_property.restricted_value_int8 = {1 / 256.0f, -128};
+      tensor_property.restricted_value_int16 = {1 / 32768.0f, 0};
       property.outputs = {{0, tensor_property}};
       property.version = 2;
       break;
@@ -894,13 +933,15 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.inputs = {{0, {}}};
       property.outputs = {{0, {}}};
       property.version = 2;
+      property.quantizable_int16 = false;
       break;
     case BuiltinOperator_TANH: {
       property.inputs = {{0, {}}};
       // Tanh requires output with 1/128 as scale and 0 as zero point.
       TensorProperty tensor_property;
       tensor_property.restriction = true;
-      tensor_property.restricted_value = {1 / 128.0f, 0};
+      tensor_property.restricted_value_int8 = {1 / 128.0f, 0};
+      tensor_property.restricted_value_int16 = {1 / 32768.0f, 0};
       property.outputs = {{0, tensor_property}};
       property.version = 2;
       break;
@@ -926,6 +967,7 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
                          {3, tensor_property_bias}};
       property.outputs = {{0, {}}};
       property.version = 3;
+      property.quantizable_int16 = false;
       break;
     }
     case BuiltinOperator_TRANSPOSE:
@@ -946,9 +988,17 @@ OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,
       property.restrict_same_input_output_scale = true;
       property.version = 2;
       break;
+    case BuiltinOperator_REDUCE_MAX:
+    case BuiltinOperator_REDUCE_MIN:
+      property.inputs = {{0, {}}};
+      property.outputs = {{0, {}}};
+      property.restrict_same_input_output_scale = true;
+      property.version = 2;
+      break;
     default:
       // No quantized implementation exists for this operation.
       property.quantizable = false;
+      property.quantizable_int16 = false;
   }
   return property;
 }

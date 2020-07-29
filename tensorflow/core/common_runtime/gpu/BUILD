@@ -14,6 +14,9 @@ load("//tensorflow:tensorflow.bzl", "tf_cc_tests_gpu")
 # buildifier: disable=same-origin-load
 load("//tensorflow:tensorflow.bzl", "tf_cuda_cc_test")
 
+# buildifier: disable=same-origin-load
+load("//tensorflow:tensorflow.bzl", "filegroup")
+
 # For platform specific build config
 load(
     "//tensorflow/core/platform:build_config.bzl",
@@ -27,10 +30,6 @@ load(
     "//tensorflow/core/platform:build_config_root.bzl",
     "if_static",
     "tf_cuda_tests_tags",
-)
-load(
-    "//tensorflow/stream_executor:build_defs.bzl",
-    "if_gpu_is_configured",
 )
 
 package(
@@ -59,7 +58,7 @@ cc_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:stream_executor",
+        "//tensorflow/core/platform:stream_executor",
     ],
 )
 
@@ -147,14 +146,13 @@ tf_cuda_library(
     copts = tf_copts(),
     cuda_deps = [
         "@local_config_cuda//cuda:cudnn_header",
+        "//tensorflow/stream_executor/cuda:cuda_platform",
     ],
     deps = [
         ":gpu_bfc_allocator",
         ":gpu_id_impl",
         ":gpu_init_impl",
         ":gpu_lib",
-        "//third_party/eigen3",
-        "//tensorflow/core:core_cpu_impl",
         "//tensorflow/core:core_cpu_lib",
         "//tensorflow/core:framework",
         "//tensorflow/core:framework_internal",
@@ -162,12 +160,13 @@ tf_cuda_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:stream_executor",
+        "//tensorflow/core/common_runtime:core_cpu_impl",
+        "//tensorflow/core/platform:stream_executor",
+        "//tensorflow/core/platform:tensor_float_32_utils",
         "//tensorflow/core/profiler/lib:annotated_traceme",
         "//tensorflow/core/profiler/lib:scoped_annotation",
-    ] + if_gpu_is_configured([
-        "//tensorflow/stream_executor/cuda:cuda_platform",
-    ]),
+        "//third_party/eigen3",
+    ],
     alwayslink = 1,
 )
 
@@ -182,7 +181,7 @@ tf_cuda_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:protos_all_cc",
-        "//tensorflow/core:stream_executor",
+        "//tensorflow/core/platform:stream_executor",
         "//third_party/eigen3",
     ] + if_static([":gpu_runtime_impl"]),
 )
@@ -220,8 +219,8 @@ tf_cuda_library(
     deps = [
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
-        "//tensorflow/core:stream_executor",
         "//tensorflow/core/framework:allocator",
+        "//tensorflow/core/platform:stream_executor",
     ],
 )
 
@@ -235,7 +234,7 @@ tf_cuda_library(
         "//tensorflow/core:framework_internal",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
-        "//tensorflow/core:stream_executor",
+        "//tensorflow/core/platform:stream_executor",
     ] + if_static(
         [":gpu_init_impl"],
     ),
@@ -256,7 +255,7 @@ tf_cuda_library(
         "//tensorflow/core:framework_internal",
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
-        "//tensorflow/core:stream_executor",
+        "//tensorflow/core/platform:stream_executor",
     ],
     alwayslink = 1,
 )

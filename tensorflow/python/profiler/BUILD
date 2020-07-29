@@ -36,6 +36,7 @@ cuda_py_test(
     srcs = ["profiler_client_test.py"],
     python_version = "PY3",
     tags = ["no_pip"],
+    tfrt_enabled = True,
     deps = [
         ":profiler_client",
         "//tensorflow/python/eager:test",
@@ -48,6 +49,8 @@ py_library(
     srcs_version = "PY2AND3",
     visibility = ["//tensorflow:internal"],
     deps = [
+        "//tensorflow/python:errors",
+        "//tensorflow/python:platform",
         "//tensorflow/python:util",
         "//tensorflow/python/profiler/internal:_pywrap_profiler",
     ],
@@ -61,11 +64,12 @@ cuda_py_test(
         "no_pip",
         "no_rocm",
     ],
+    tfrt_enabled = True,
     deps = [
         ":profiler_v2",
         "//tensorflow/python:constant_op",
         "//tensorflow/python/eager:test",
-        "//tensorflow/python/profiler:traceme",
+        "//tensorflow/python/profiler:trace",
     ],
 )
 
@@ -120,6 +124,7 @@ cuda_py_test(
     srcs = ["profiler_test.py"],
     python_version = "PY3",
     tags = ["no_pip"],
+    tfrt_enabled = True,
     xla_enable_strict_auto_jit = False,  # Node names are different with autojit
     deps = [
         ":model_analyzer",
@@ -180,6 +185,7 @@ cuda_py_test(
         "no_gpu",  # b/136036359
         "no_pip",
     ],
+    tfrt_enabled = True,
     xla_enable_strict_auto_jit = False,  # Node names are different with autojit
     deps = [
         ":profile_context",
@@ -222,7 +228,10 @@ py_library(
     name = "trace",
     srcs = ["trace.py"],
     srcs_version = "PY2AND3",
-    visibility = ["//tensorflow:internal"],
+    visibility = [
+        "//perftools/accelerators/xprof/xprofilez/integration_tests:__pkg__",
+        "//tensorflow:internal",
+    ],
     deps = [
         "//tensorflow/python:tf_export",
         "//tensorflow/python/profiler/internal:_pywrap_traceme",

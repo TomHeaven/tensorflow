@@ -19,6 +19,8 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/client/xla_computation.h"
 #include "tensorflow/compiler/xla/debug_options_flags.h"
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_matchers.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/shape_util.h"
@@ -554,6 +556,32 @@ TEST_F(XlaBuilderTest, DynamicParameter) {
                                  ->shape()
                                  .tuple_shapes(1);
   EXPECT_TRUE(param_shape.is_dynamic_dimension(0));
+}
+
+TEST_F(XlaBuilderTest, SetDimensionSize) {
+  XlaBuilder b(TestName());
+  auto p0 = Parameter(&b, 0, ShapeUtil::MakeShape(F32, {10}), "p0");
+  auto p1 = Parameter(&b, 1, ShapeUtil::MakeShape(S32, {}), "p1");
+  auto set_dim_size = SetDimensionSize(p0, p1, 0);
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          BuildHloModule(&b, /*root=*/set_dim_size));
+  const Shape& root_shape =
+      module->entry_computation()->root_instruction()->shape();
+  EXPECT_TRUE(root_shape.is_dynamic_dimension(0));
+}
+
+TEST_F(XlaBuilderTest, RemoveDimensionSize) {
+  XlaBuilder b(TestName());
+  auto p0 = Parameter(&b, 0, ShapeUtil::MakeShape(F32, {10}), "p0");
+  auto p1 = Parameter(&b, 1, ShapeUtil::MakeShape(S32, {}), "p1");
+  auto set_dim_size = SetDimensionSize(p0, p1, 0);
+  auto remove_dim_size = RemoveDynamicDimension(set_dim_size, 0);
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          BuildHloModule(&b, /*root=*/remove_dim_size));
+  const Shape& root_shape =
+      module->entry_computation()->root_instruction()->shape();
+  // Dynamic dimension has been removed.
+  EXPECT_FALSE(root_shape.is_dynamic_dimension(0));
 }
 
 TEST_F(XlaBuilderTest, DynamicUnary) {
@@ -1177,5 +1205,16 @@ TEST_F(XlaBuilderTest, AddFrontendAttribute) {
   TF_ASSERT_OK_AND_ASSIGN(auto module, BuildHloModule(&b));
   ExpectInstructionsAttributesMatch(*module, expected);
 }
+
+TEST_F(XlaBuilderTest, ComparisonType) {
+  XlaBuilder b(TestName());
+  (void)Le(ConstantR0<int32>(&b, 1), ConstantR0<int32>(&b, 2));
+  TF_ASSERT_OK_AND_ASSIGN(auto module, BuildHloModule(&b));
+  auto root = module->entry_computation()->root_instruction();
+  ASSERT_THAT(root, op::Compare(op::Constant(), op::Constant()));
+  EXPECT_EQ(Comparison::Type::kSigned,
+            DynCast<HloCompareInstruction>(root)->type());
+}
+
 }  // namespace
 }  // namespace xla

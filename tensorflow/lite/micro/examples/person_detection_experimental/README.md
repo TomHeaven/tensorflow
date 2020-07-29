@@ -10,6 +10,7 @@ This uses the experimental int8 quantized version of the person detection model.
 -   [Getting started](#getting-started)
 -   [Running on ARC EM SDP](#running-on-arc-em-sdp)
 -   [Running on Arduino](#running-on-arduino)
+-   [Running on HIMAX WE1 EVB](#running-on-himax-we1-evb)
 -   [Running on SparkFun Edge](#running-on-sparkfun-edge)
 -   [Run the tests on a development machine](#run-the-tests-on-a-development-machine)
 -   [Debugging image capture](#debugging-image-capture)
@@ -49,8 +50,13 @@ The example project for ARC EM SDP platform can be generated with the following
 command:
 
 ```
-make -f tensorflow/lite/micro/tools/make/Makefile TARGET=arc_emsdp generate_person_detection_int8_make_project
+make -f tensorflow/lite/micro/tools/make/Makefile \
+TARGET=arc_emsdp TAGS=reduce_codesize \
+generate_person_detection_int8_make_project
 ```
+
+Note that `TAGS=reduce_codesize` applies example specific changes of code to
+reduce total size of application. It can be ommited.
 
 ### Build and Run Example
 
@@ -92,6 +98,11 @@ get it started.
     *   Plug in the microSD card into the J11 connector.
     *   Push the RST button. If a red LED is lit beside RST button, push the CFG
         button.
+    *   Type or copy next commands one-by-another into serial terminal: `setenv
+        loadaddr 0x10800000 setenv bootfile app.elf setenv bootdelay 1 setenv
+        bootcmd fatload mmc 0 \$\{loadaddr\} \$\{bootfile\} \&\& bootelf
+        saveenv`
+    *   Push the RST button.
 
 6.  If you have the MetaWare Debugger installed in your environment:
 
@@ -259,6 +270,112 @@ takes:
 From the log, we can see that it took around 170 ms to capture and read the
 image data from the camera module, 180 ms to decode the JPEG and convert it to
 greyscale, and 18.6 seconds to run inference.
+
+## Running on HIMAX WE1 EVB
+
+The following instructions will help you build and deploy this example to
+[HIMAX WE1 EVB](https://github.com/HimaxWiseEyePlus/bsp_tflu/tree/master/HIMAX_WE1_EVB_board_brief)
+board. To undstand more about using this board, please check
+[HIMAX WE1 EVB user guide](https://github.com/HimaxWiseEyePlus/bsp_tflu/tree/master/HIMAX_WE1_EVB_user_guide).
+
+### Initial Setup
+
+To use the HIMAX WE1 EVB, please make sure following software are installed:
+
+#### MetaWare Development Toolkit
+
+See
+[Install the Synopsys DesignWare ARC MetaWare Development Toolkit](/tensorflow/lite/micro/tools/make/targets/arc/README.md#install-the-synopsys-designware-arc-metaware-development-toolkit)
+section for instructions on toolchain installation.
+
+#### Make Tool version
+
+A `'make'` tool is required for deploying Tensorflow Lite Micro applications on
+HIMAX WE1 EVB, See
+[Check make tool version](/tensorflow/lite/micro/tools/make/targets/arc/README.md#make-tool)
+section for proper environment.
+
+#### Serial Terminal Emulation Application
+
+There are 2 main purposes for HIMAX WE1 EVB Debug UART port
+
+-   print application output
+-   burn application to flash by using xmodem send application binary
+
+You can use any terminal emulation program (like [PuTTY](https://www.putty.org/)
+or [minicom](https://linux.die.net/man/1/minicom)).
+
+### Generate Example Project
+
+The example project for HIMAX WE1 EVB platform can be generated with the
+following command:
+
+Download related third party data
+
+```
+make -f tensorflow/lite/micro/tools/make/Makefile TARGET=himax_we1_evb third_party_downloads
+```
+
+Generate person detection project
+
+```
+make -f tensorflow/lite/micro/tools/make/Makefile generate_person_detection_int8_make_project TARGET=himax_we1_evb
+```
+
+### Build and Burn Example
+
+Following the Steps to run person detection example at HIMAX WE1 EVB platform.
+
+1.  Go to the generated example project directory.
+
+    ```
+    cd tensorflow/lite/micro/tools/make/gen/himax_we1_evb_arc/prj/person_detection_int8/make
+    ```
+
+2.  Build the example using
+
+    ```
+    make app
+    ```
+
+3.  After example build finish, copy ELF file and map file to image generate
+    tool directory. \
+    image generate tool directory located at
+    `'tensorflow/lite/micro/tools/make/downloads/himax_we1_sdk/image_gen_linux_v3/'`
+
+    ```
+    cp person_detection_int8.elf himax_we1_evb.map ../../../../../downloads/himax_we1_sdk/image_gen_linux_v3/
+    ```
+
+4.  Go to flash image generate tool directory.
+
+    ```
+    cd ../../../../../downloads/himax_we1_sdk/image_gen_linux_v3/
+    ```
+
+    make sure this tool directory is in $PATH. You can permanently set it to
+    PATH by
+
+    ```
+    export PATH=$PATH:$(pwd)
+    ```
+
+5.  run image generate tool, generate flash image file.
+
+    *   Before running image generate tool, by typing `sudo chmod +x image_gen`
+        and `sudo chmod +x sign_tool` to make sure it is executable.
+
+    ```
+    image_gen -e person_detection_int8.elf -m himax_we1_evb.map -o out.img
+    ```
+
+6.  Download flash image file to HIMAX WE1 EVB by UART:
+
+    *   more detail about download image through UART can be found at
+        [HIMAX WE1 EVB update Flash image](https://github.com/HimaxWiseEyePlus/bsp_tflu/tree/master/HIMAX_WE1_EVB_user_guide#flash-image-update)
+
+After these steps, press reset button on the HIMAX WE1 EVB, you will see
+application output in the serial terminal.
 
 ## Running on SparkFun Edge
 

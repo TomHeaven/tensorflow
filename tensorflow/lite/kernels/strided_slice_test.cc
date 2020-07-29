@@ -12,11 +12,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#include <stdint.h>
+
+#include <initializer_list>
+#include <vector>
+
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include "tensorflow/lite/interpreter.h"
-#include "tensorflow/lite/kernels/register.h"
 #include "tensorflow/lite/kernels/test_util.h"
-#include "tensorflow/lite/model.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 namespace tflite {
 namespace {
@@ -645,5 +649,48 @@ TYPED_TEST(StridedSliceOpTest, In5D_IdentityShrinkAxis1) {
   EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 2, 1, 2}));
   EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 2, 3, 4}));
 }
+
+TYPED_TEST(StridedSliceOpTest, In3D_SmallBegin) {
+  StridedSliceOpModel<TypeParam> m({2, 3, 2}, {1}, {1}, {1}, 0, 0, 0, 0, 0);
+  m.SetInput({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+  m.SetBegin({0});
+  m.SetEnd({1});
+  m.SetStrides({1});
+  m.Invoke();
+  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({1, 3, 2}));
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 2, 3, 4, 5, 6}));
+}
+
+TYPED_TEST(StridedSliceOpTest, In3D_SmallBeginWithhrinkAxis1) {
+  StridedSliceOpModel<TypeParam> m({2, 3, 2}, {1}, {1}, {1}, 0, 0, 0, 0, 1);
+  m.SetInput({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+  m.SetBegin({0});
+  m.SetEnd({1});
+  m.SetStrides({1});
+  m.Invoke();
+  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({3, 2}));
+  EXPECT_THAT(m.GetOutput(), ElementsAreArray({1, 2, 3, 4, 5, 6}));
+}
+
+TYPED_TEST(StridedSliceOpTest, In3D_BackwardSmallBegin) {
+  StridedSliceOpModel<TypeParam> m({1, 1, 2}, {1}, {1}, {1}, 0, 1, 0, 0, 0);
+  m.SetInput({1, 2});
+  m.SetBegin({1});
+  m.SetEnd({0});
+  m.SetStrides({1});
+  m.Invoke();
+  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({0, 1, 2}));
+}
+
+TYPED_TEST(StridedSliceOpTest, In3D_Backward) {
+  StridedSliceOpModel<TypeParam> m({1, 1, 2}, {3}, {3}, {3}, 6, 7, 0, 0, 0);
+  m.SetInput({1, 2});
+  m.SetBegin({1, 0, 0});
+  m.SetEnd({0, -1, -1});
+  m.SetStrides({1, 1, 1});
+  m.Invoke();
+  EXPECT_THAT(m.GetOutputShape(), ElementsAreArray({0, 1, 2}));
+}
+
 }  // namespace
 }  // namespace tflite

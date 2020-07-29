@@ -16,6 +16,10 @@ limitations under the License.
 #ifndef TENSORFLOW_LITE_DELEGATES_GPU_CL_API_H_
 #define TENSORFLOW_LITE_DELEGATES_GPU_CL_API_H_
 
+#ifdef CL_DELEGATE_NO_GL
+#define EGL_NO_PROTOTYPES
+#endif
+
 #include <EGL/egl.h>
 
 #include <cstdint>
@@ -70,6 +74,20 @@ struct InferenceEnvironmentProperties {
 class InferenceEnvironment {
  public:
   virtual ~InferenceEnvironment() {}
+
+  // Converts GraphFloat32 into intermediate, device-specific representation.
+  // This serialized_model specific for device and InferenceOptions.
+  // serialized_model cannot be used with another device or InferenceOptions.
+  // Loading serialized_model is much faster than loading GraphFloat32.
+  // serialized_model must be used with appropriate NewInferenceBuilder
+  // method (see below).
+  virtual absl::Status BuildSerializedModel(
+      const InferenceOptions& options, GraphFloat32 model,
+      std::vector<uint8_t>* serialized_model) = 0;
+
+  virtual absl::Status NewInferenceBuilder(
+      const std::vector<uint8_t>& serialized_model,
+      std::unique_ptr<InferenceBuilder>* builder) = 0;
 
   virtual absl::Status NewInferenceBuilder(
       const InferenceOptions& options, GraphFloat32 model,

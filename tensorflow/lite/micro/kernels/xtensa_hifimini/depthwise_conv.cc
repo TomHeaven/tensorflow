@@ -24,22 +24,50 @@ limitations under the License.
 #include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
 #include "tensorflow/lite/kernels/padding.h"
+#include "tensorflow/lite/micro/kernels/kernel_util.h"
 #include "tensorflow/lite/micro/kernels/xtensa_hifimini/fixedpoint_utils.h"
 
 namespace tflite {
-namespace ops {
-namespace micro {
-namespace depthwise_conv {
-namespace xtensa {
-namespace hifimini {
+namespace {
+
+constexpr int kInputTensor = 0;
+constexpr int kFilterTensor = 1;
+constexpr int kBiasTensor = 2;
+constexpr int kOutputTensor = 0;
+
+// Depthwise conv is quantized along dimension 3:
+// https://www.tensorflow.org/lite/performance/quantization_spec
+constexpr int kDepthwiseConvQuantizedDimension = 3;
+
+struct OpData {
+  TfLitePaddingValues padding;
+  // The scaling factor from input to output (aka the 'real multiplier') can
+  // be represented as a fixed point multiplier plus a left shift.
+  int32_t output_multiplier;
+  int output_shift;
+
+  // Cached tensor zero point values for quantized operations.
+  int32_t input_zero_point;
+  int32_t output_zero_point;
+
+  // Per channel output multiplier and shift.
+  // TODO(b/141139247): Allocate these dynamically when possible.
+  int32_t* per_channel_output_multiplier;
+  int32_t* per_channel_output_shift;
+
+  // The range of the fused activation layer. For example for kNone and
+  // uint8_t these would be 0 and 255.
+  int32_t output_activation_min;
+  int32_t output_activation_max;
+};
 
 inline void DepthwiseConvPerChannel(
-    const DepthwiseParams& params, const int32* output_multiplier,
-    const int32* output_shift, const RuntimeShape& input_shape,
-    const int8* input_data, const RuntimeShape& filter_shape,
-    const int8* filter_data, const RuntimeShape& bias_shape,
-    const int32* bias_data, const RuntimeShape& output_shape,
-    int8* output_data) {
+    const DepthwiseParams& params, const int32_t* output_multiplier,
+    const int32_t* output_shift, const RuntimeShape& input_shape,
+    const int8_t* input_data, const RuntimeShape& filter_shape,
+    const int8_t* filter_data, const RuntimeShape& bias_shape,
+    const int32_t* bias_data, const RuntimeShape& output_shape,
+    int8_t* output_data) {
   // TODO(b/154032858): Investigate removing extra copies.
   const int stride_width = params.stride_width;
   const int stride_height = params.stride_height;
@@ -48,10 +76,10 @@ inline void DepthwiseConvPerChannel(
   const int pad_width = params.padding_values.width;
   const int pad_height = params.padding_values.height;
   const int depth_multiplier = params.depth_multiplier;
-  const int32 input_offset = params.input_offset;
-  const int32 output_offset = params.output_offset;
-  const int32 output_activation_min = params.quantized_activation_min;
-  const int32 output_activation_max = params.quantized_activation_max;
+  const int32_t input_offset = params.input_offset;
+  const int32_t output_offset = params.output_offset;
+  const int32_t output_activation_min = params.quantized_activation_min;
+  const int32_t output_activation_max = params.quantized_activation_max;
 
   const int batches = input_shape.Dims(0);
 
@@ -99,16 +127,16 @@ inline void DepthwiseConvPerChannel(
                       ((batch * input_height + in_y) * input_width + in_x) *
                           input_depth +
                       (in_channel);
-                  int32 input_val = input_data[input_idx];
+                  int32_t input_val = input_data[input_idx];
 
                   // Find current filter index, minus 2 for Xtensa load
                   // alignments:
                   int filter_idx =
                       ((filter_y)*filter_width + filter_x) * filter_depth +
                       (output_channel);
-                  int32 filter_val = filter_data[filter_idx];
+                  int32_t filter_val = filter_data[filter_idx];
 
-                  // Load 8bit value as int32 into a 24x24 register and right
+                  // Load 8bit value as int32_t into a 24x24 register and right
                   // shift into 24bit space. Note: value is duplicated in the HH
                   // and LL register - but all calculations are done on the HH
                   // side.
@@ -144,7 +172,7 @@ inline void DepthwiseConvPerChannel(
 
             // Apply quantized multiplier and accumulate result at 48bit
             // alignment:
-            acc_56 = micro::xtensa::hifimini::MultiplyByQuantizedMultiplier(
+            acc_56 = MultiplyByQuantizedMultiplier(
                 acc_24x2, output_multiplier[output_channel],
                 output_shift[output_channel]);
 
@@ -171,11 +199,11 @@ constexpr int kConvolutionalKernelDepth = 32;
 inline void DepthwiseConv4x32MatchingInputAndFilter(
     const int input_offset, const int output_offset,
     const int quantized_activation_min, const int quantized_activation_max,
-    const int32* output_multiplier, const int32* output_shift,
-    const RuntimeShape& input_shape, const int8* input_data,
-    const RuntimeShape& filter_shape, const int8* filter_data,
-    const RuntimeShape& bias_shape, const int32* bias_data,
-    const RuntimeShape& output_shape, int8* output_data) {
+    const int32_t* output_multiplier, const int32_t* output_shift,
+    const RuntimeShape& input_shape, const int8_t* input_data,
+    const RuntimeShape& filter_shape, const int8_t* filter_data,
+    const RuntimeShape& bias_shape, const int32_t* bias_data,
+    const RuntimeShape& output_shape, int8_t* output_data) {
   // Convert the (unsigned) 32-bit multiplier down to a 24-bit multiplier.
   const int32_t mult = output_multiplier[0] >> 8;
   const int32_t shift = output_shift[0];
@@ -189,16 +217,16 @@ inline void DepthwiseConv4x32MatchingInputAndFilter(
   const int stride_elements =
       (kConvolutionalKernelDepth / kConvolutionalKernelWidth);
 
-  const int8* input_0_ptr = (const int8*)(input_data - 2);
-  const int8* weight_0_ptr = (const int8*)(filter_data - 2);
+  const int8_t* input_0_ptr = (const int8_t*)(input_data - 2);
+  const int8_t* weight_0_ptr = (const int8_t*)(filter_data - 2);
   // Apply the kernels in blocks of 4 for all the channels.
-  const int8* input_1_ptr = input_0_ptr + stride_elements * 4;
-  const int8* input_2_ptr = input_1_ptr + stride_elements * 4;
-  const int8* input_3_ptr = input_2_ptr + stride_elements * 4;
+  const int8_t* input_1_ptr = input_0_ptr + stride_elements * 4;
+  const int8_t* input_2_ptr = input_1_ptr + stride_elements * 4;
+  const int8_t* input_3_ptr = input_2_ptr + stride_elements * 4;
 
-  const int8* weight_1_ptr = weight_0_ptr + stride_elements * 4;
-  const int8* weight_2_ptr = weight_1_ptr + stride_elements * 4;
-  const int8* weight_3_ptr = weight_2_ptr + stride_elements * 4;
+  const int8_t* weight_1_ptr = weight_0_ptr + stride_elements * 4;
+  const int8_t* weight_2_ptr = weight_1_ptr + stride_elements * 4;
+  const int8_t* weight_3_ptr = weight_2_ptr + stride_elements * 4;
 
   for (int i = 0; i < num_blocks; ++i) {
     ae_q56s block_0_acc = AE_ZEROQ56();
@@ -259,12 +287,10 @@ inline void DepthwiseConv4x32MatchingInputAndFilter(
 
     // Apply quantized multiplier and accumulate result at 48bit
     // alignment:
-    block_0_acc = micro::xtensa::hifimini::MultiplyByQuantizedMultiplier(
-        acc_24x2_0, mult, shift);
+    block_0_acc = MultiplyByQuantizedMultiplier(acc_24x2_0, mult, shift);
     // Apply quantized multiplier and accumulate result at 48bit
     // alignment:
-    block_1_acc = micro::xtensa::hifimini::MultiplyByQuantizedMultiplier(
-        acc_24x2_1, mult, shift);
+    block_1_acc = MultiplyByQuantizedMultiplier(acc_24x2_1, mult, shift);
 
     // Add output offset, cap activation, and assign to the output:
     block_0_acc = AE_ADDQ56(block_0_acc, output_offset_56);
@@ -278,38 +304,6 @@ inline void DepthwiseConv4x32MatchingInputAndFilter(
     output_data[ch_1] = static_cast<int8_t>(AE_TRUNCA32Q48(block_1_acc));
   }
 }
-
-}  // namespace hifimini
-}  // namespace xtensa
-
-namespace {
-
-constexpr int kInputTensor = 0;
-constexpr int kFilterTensor = 1;
-constexpr int kBiasTensor = 2;
-constexpr int kOutputTensor = 0;
-
-// Depthwise conv is quantized along dimension 3:
-// https://www.tensorflow.org/lite/performance/quantization_spec
-constexpr int kDepthwiseConvQuantizedDimension = 3;
-
-struct OpData {
-  TfLitePaddingValues padding;
-  // The scaling factor from input to output (aka the 'real multiplier') can
-  // be represented as a fixed point multiplier plus a left shift.
-  int32_t output_multiplier;
-  int output_shift;
-
-  // Per channel output multiplier and shift.
-  // TODO(b/141139247): Allocate these dynamically when possible.
-  int32_t* per_channel_output_multiplier;
-  int32_t* per_channel_output_shift;
-
-  // The range of the fused activation layer. For example for kNone and
-  // uint8_t these would be 0 and 255.
-  int32_t output_activation_min;
-  int32_t output_activation_max;
-};
 
 TfLiteStatus CalculateOpData(TfLiteContext* context, TfLiteNode* node,
                              TfLiteDepthwiseConvParams* params, int width,
@@ -348,16 +342,9 @@ TfLiteStatus CalculateOpData(TfLiteContext* context, TfLiteNode* node,
   return kTfLiteOk;
 }
 
-}  // namespace
-
 void* Init(TfLiteContext* context, const char* buffer, size_t length) {
   TFLITE_DCHECK(context->AllocatePersistentBuffer != nullptr);
-  void* data = nullptr;
-  if (context->AllocatePersistentBuffer(context, sizeof(OpData), &data) ==
-      kTfLiteError) {
-    return nullptr;
-  }
-  return data;
+  return context->AllocatePersistentBuffer(context, sizeof(OpData));
 }
 
 TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
@@ -368,6 +355,7 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
 
   const TfLiteTensor* input = GetInput(context, node, kInputTensor);
   const TfLiteTensor* filter = GetInput(context, node, kFilterTensor);
+  const TfLiteTensor* output = GetOutput(context, node, kOutputTensor);
 
   auto* op_data = reinterpret_cast<OpData*>(node->user_data);
 
@@ -377,16 +365,19 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   int filter_width = SizeOfDimension(filter, 2);
   int filter_height = SizeOfDimension(filter, 1);
 
-  // Per channel quantization is only needed for int8 inference. For other
+  // Per channel quantization is only needed for int8_t inference. For other
   // quantized types, only a single scale and zero point is needed.
   const int num_channels = filter->dims->data[kDepthwiseConvQuantizedDimension];
   // Dynimically allocate per-channel quantization parameters.
-  TF_LITE_ENSURE_STATUS(context->AllocatePersistentBuffer(
-      context, num_channels * sizeof(int32_t),
-      reinterpret_cast<void**>(&op_data->per_channel_output_multiplier)));
-  TF_LITE_ENSURE_STATUS(context->AllocatePersistentBuffer(
-      context, num_channels * sizeof(int32_t),
-      reinterpret_cast<void**>(&op_data->per_channel_output_shift)));
+  op_data->per_channel_output_multiplier =
+      reinterpret_cast<int32_t*>(context->AllocatePersistentBuffer(
+          context, num_channels * sizeof(int32_t)));
+  op_data->per_channel_output_shift =
+      reinterpret_cast<int32_t*>(context->AllocatePersistentBuffer(
+          context, num_channels * sizeof(int32_t)));
+
+  op_data->input_zero_point = input->params.zero_point;
+  op_data->output_zero_point = output->params.zero_point;
 
   // All per-channel quantized tensors need valid zero point and scale arrays.
   if (input->type == kTfLiteInt8) {
@@ -413,9 +404,10 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
 
 void EvalQuantizedPerChannel(TfLiteContext* context, TfLiteNode* node,
                              TfLiteDepthwiseConvParams* params, OpData* data,
-                             const TfLiteTensor* input,
-                             const TfLiteTensor* filter,
-                             const TfLiteTensor* bias, TfLiteTensor* output) {
+                             const TfLiteEvalTensor* input,
+                             const TfLiteEvalTensor* filter,
+                             const TfLiteEvalTensor* bias,
+                             TfLiteEvalTensor* output) {
   DepthwiseParams op_params;
   op_params.padding_type = PaddingType::kSame;
   op_params.padding_values.width = data->padding.width;
@@ -425,20 +417,23 @@ void EvalQuantizedPerChannel(TfLiteContext* context, TfLiteNode* node,
   op_params.dilation_width_factor = params->dilation_width_factor;
   op_params.dilation_height_factor = params->dilation_height_factor;
   op_params.depth_multiplier = params->depth_multiplier;
-  op_params.input_offset = -input->params.zero_point;
+  op_params.input_offset = -data->input_zero_point;
   op_params.weights_offset = 0;
-  op_params.output_offset = output->params.zero_point;
+  op_params.output_offset = data->output_zero_point;
   // TODO(b/130439627): Use calculated value for clamping.
   op_params.quantized_activation_min = std::numeric_limits<int8_t>::min();
   op_params.quantized_activation_max = std::numeric_limits<int8_t>::max();
 
-  xtensa::hifimini::DepthwiseConvPerChannel(
-      op_params, data->per_channel_output_multiplier,
-      data->per_channel_output_shift, GetTensorShape(input),
-      GetTensorData<int8>(input), GetTensorShape(filter),
-      GetTensorData<int8>(filter), GetTensorShape(bias),
-      GetTensorData<int32>(bias), GetTensorShape(output),
-      GetTensorData<int8>(output));
+  DepthwiseConvPerChannel(op_params, data->per_channel_output_multiplier,
+                          data->per_channel_output_shift,
+                          tflite::micro::GetTensorShape(input),
+                          tflite::micro::GetTensorData<int8_t>(input),
+                          tflite::micro::GetTensorShape(filter),
+                          tflite::micro::GetTensorData<int8_t>(filter),
+                          tflite::micro::GetTensorShape(bias),
+                          tflite::micro::GetTensorData<int32_t>(bias),
+                          tflite::micro::GetTensorShape(output),
+                          tflite::micro::GetTensorData<int8_t>(output));
 }
 
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
@@ -448,11 +443,16 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
       reinterpret_cast<TfLiteDepthwiseConvParams*>(node->builtin_data);
   auto* op_data = reinterpret_cast<OpData*>(node->user_data);
 
-  TfLiteTensor* output = GetOutput(context, node, kOutputTensor);
-  const TfLiteTensor* input = GetInput(context, node, kInputTensor);
-  const TfLiteTensor* filter = GetInput(context, node, kFilterTensor);
-  const TfLiteTensor* bias =
-      (NumInputs(node) == 3) ? GetInput(context, node, kBiasTensor) : nullptr;
+  TfLiteEvalTensor* output =
+      tflite::micro::GetEvalOutput(context, node, kOutputTensor);
+  const TfLiteEvalTensor* input =
+      tflite::micro::GetEvalInput(context, node, kInputTensor);
+  const TfLiteEvalTensor* filter =
+      tflite::micro::GetEvalInput(context, node, kFilterTensor);
+  const TfLiteEvalTensor* bias =
+      (NumInputs(node) == 3)
+          ? tflite::micro::GetEvalInput(context, node, kBiasTensor)
+          : nullptr;
 
   // Handle special case for streaming model.
   int* input_dims = input->dims->data;
@@ -460,15 +460,18 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   if (input_dims[0] == 1 && input_dims[1] == 4 && input_dims[2] == 1 &&
       input_dims[3] == 32 && filter_dims[0] == 1 && filter_dims[1] == 4 &&
       filter_dims[2] == 1 && filter_dims[3] == 32) {
-    xtensa::hifimini::DepthwiseConv4x32MatchingInputAndFilter(
-        -input->params.zero_point, output->params.zero_point,
+    DepthwiseConv4x32MatchingInputAndFilter(
+        -op_data->input_zero_point, op_data->output_zero_point,
         std::numeric_limits<int8_t>::min(), std::numeric_limits<int8_t>::max(),
         op_data->per_channel_output_multiplier,
-        op_data->per_channel_output_shift, GetTensorShape(input),
-        GetTensorData<int8>(input), GetTensorShape(filter),
-        GetTensorData<int8>(filter), GetTensorShape(bias),
-        GetTensorData<int32>(bias), GetTensorShape(output),
-        GetTensorData<int8>(output));
+        op_data->per_channel_output_shift, tflite::micro::GetTensorShape(input),
+        tflite::micro::GetTensorData<int8_t>(input),
+        tflite::micro::GetTensorShape(filter),
+        tflite::micro::GetTensorData<int8_t>(filter),
+        tflite::micro::GetTensorShape(bias),
+        tflite::micro::GetTensorData<int32_t>(bias),
+        tflite::micro::GetTensorShape(output),
+        tflite::micro::GetTensorData<int8_t>(output));
     return kTfLiteOk;
   }
   switch (input->type) {  // Already know in/out types are same.
@@ -484,20 +487,17 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   return kTfLiteOk;
 }
 
-}  // namespace depthwise_conv
+}  // namespace
 
-TfLiteRegistration* Register_DEPTHWISE_CONV_2D() {
-  static TfLiteRegistration r = {/*init=*/depthwise_conv::Init,
-                                 /*free=*/nullptr,
-                                 /*prepare=*/depthwise_conv::Prepare,
-                                 /*invoke=*/depthwise_conv::Eval,
-                                 /*profiling_string=*/nullptr,
-                                 /*builtin_code=*/0,
-                                 /*custom_name=*/nullptr,
-                                 /*version=*/0};
-  return &r;
+TfLiteRegistration Register_DEPTHWISE_CONV_2D() {
+  return {/*init=*/Init,
+          /*free=*/nullptr,
+          /*prepare=*/Prepare,
+          /*invoke=*/Eval,
+          /*profiling_string=*/nullptr,
+          /*builtin_code=*/0,
+          /*custom_name=*/nullptr,
+          /*version=*/0};
 }
 
-}  // namespace micro
-}  // namespace ops
 }  // namespace tflite

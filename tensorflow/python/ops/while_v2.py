@@ -161,6 +161,10 @@ def while_loop(cond,
       Returns:
         A list of tensors the same length as args.
       """
+      # The function was created with a signature rather than tensors, so
+      # internal placeholders were created without handle data.
+      _copy_handle_data(nest.flatten(loop_vars[2:], expand_composites=True),
+                        nest.flatten(args, expand_composites=True))
       # Capture the tensors already captured in cond_graph so that they appear
       # in the same order in body_graph.external_captures.
       for t in cond_graph.external_captures:
@@ -372,7 +376,7 @@ def _WhileGrad(op, *grads):  # pylint: disable=invalid-name
     while_op._add_while_inputs(new_inputs)
     while_op._add_outputs([t.dtype for t in new_outputs],
                           [t.shape for t in new_outputs])
-    _copy_handle_data(new_outputs, op.outputs[orig_num_params:])
+    _copy_handle_data(new_outputs, while_op.outputs[orig_num_params:])
 
   # Do not ignore grads wrt extra outputs when computing higher order
   # derivatives.
@@ -519,6 +523,12 @@ def _preprocess_grad(grad, body_graph_output, while_op_input, while_op_output):
   if (while_op_output.dtype in (dtypes.resource, dtypes.variant) and
       default_gradient.supports_default_grad(while_op_input) and grad is None):
     return _zeros_like(while_op_input, while_op_output)
+
+  # Convert IndexedSlices to dense tensors since it is unlikely that downstream
+  # gradient functions with properly handle indexed slices. This is similar to
+  # what we do in tf.function gradients.
+  if isinstance(grad, ops.IndexedSlices):
+    return ops.convert_to_tensor(grad)
 
   return grad
 
@@ -865,7 +875,7 @@ class _WhileBodyGradFuncGraph(util.WhileBodyFuncGraph):
   This only allows capturing tensors in the forward graph. A ValueError is
   raised if an attempt is made to capture a tensor not in the forward graph.
   To manually capture capture a tensor that is not in the forward graph, call
-  `capture` with `whitelisted=True`.
+  `capture` with `allowlisted=True`.
 
   Note: The `captures` dict does not contain the forward tensor since it is not
   directly captured. It contains the accumulator corresponding to this forward
@@ -968,16 +978,16 @@ class _WhileBodyGradFuncGraph(util.WhileBodyFuncGraph):
         op_def=op_def,
         compute_device=compute_device)
 
-  def capture(self, tensor, name=None, whitelisted=False):
+  def capture(self, tensor, name=None, allowlisted=False):
     """Selectively captures external tensors.
 
-    If `whitelisted` is False only allows capturing tensors in the
+    If `allowlisted` is False only allows capturing tensors in the
     `_forward_graph`.
 
     Args:
       tensor: Tensor. May be from this FuncGraph or a different graph.
       name: Optional name if a placeholder is created.
-      whitelisted: If False (default), only allows capturing tensors from the
+      allowlisted: If False (default), only allows capturing tensors from the
         forward graph.
 
     Returns:
@@ -985,9 +995,9 @@ class _WhileBodyGradFuncGraph(util.WhileBodyFuncGraph):
 
     Raises:
       ValueError: If attempting to capture an external tensor not in the forward
-        graph with `whitelisted` set to False.
+        graph with `allowlisted` set to False.
     """
-    if not whitelisted and (isinstance(tensor, ops.EagerTensor) or
+    if not allowlisted and (isinstance(tensor, ops.EagerTensor) or
                             (tensor.graph is not self and
                              tensor.graph != self._forward_graph)):
       with self._forward_cond_graph.as_default():
@@ -1136,7 +1146,7 @@ class _WhileBodyGradFuncGraph(util.WhileBodyFuncGraph):
         "Resource tensors must be loop invariants %s." % tensor_in_outer_graph)
 
     self._indirect_captures[ops.tensor_id(tensor)] = self.capture(
-        tensor_in_outer_graph, whitelisted=True)
+        tensor_in_outer_graph, allowlisted=True)
     return self._indirect_captures[ops.tensor_id(tensor)]
 
 

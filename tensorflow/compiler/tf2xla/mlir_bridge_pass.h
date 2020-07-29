@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_TF2XLA_MLIR_BRIDGE_PASS_H_
 
 #include "llvm/ADT/StringRef.h"
+#include "tensorflow/compiler/jit/flags.h"
 #include "tensorflow/compiler/mlir/mlir_graph_optimization_pass.h"
 
 namespace tensorflow {
@@ -29,7 +30,13 @@ class MlirBridgePass : public MlirOptimizationPass {
   llvm::StringRef name() const override { return "bridge"; }
 
   bool IsEnabled(const ConfigProto& config_proto) const override {
-    return config_proto.experimental().enable_mlir_bridge();
+    return config_proto.experimental().enable_mlir_bridge() ||
+           config_proto.experimental().mlir_bridge_rollout() ==
+               tensorflow::ConfigProto::Experimental::
+                   MLIR_BRIDGE_ROLLOUT_ENABLED ||
+           tensorflow::GetMlirCommonFlags()->tf_mlir_enable_mlir_bridge ==
+               tensorflow::ConfigProto::Experimental::
+                   MLIR_BRIDGE_ROLLOUT_ENABLED;
   }
 
   // This should be used as a thin mapper around mlir::ModulePass::runOnModule
@@ -45,7 +52,13 @@ class MlirBridgeV1CompatPass : public MlirV1CompatOptimizationPass {
   llvm::StringRef name() const override { return "bridge"; }
 
   bool IsEnabled(const ConfigProto& config_proto) const override {
-    return config_proto.experimental().enable_mlir_bridge();
+    return config_proto.experimental().enable_mlir_bridge() ||
+           config_proto.experimental().mlir_bridge_rollout() ==
+               tensorflow::ConfigProto::Experimental::
+                   MLIR_BRIDGE_ROLLOUT_ENABLED ||
+           tensorflow::GetMlirCommonFlags()->tf_mlir_enable_mlir_bridge ==
+               tensorflow::ConfigProto::Experimental::
+                   MLIR_BRIDGE_ROLLOUT_ENABLED;
   }
 
   // This should be used as a thin mapper around mlir::ModulePass::runOnModule

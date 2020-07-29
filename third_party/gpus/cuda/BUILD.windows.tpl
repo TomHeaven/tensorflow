@@ -171,6 +171,11 @@ cc_library(
     ],
 )
 
+alias(
+    name = "cub_headers",
+    actual = "%{cub_actual}"
+)
+
 cuda_header_library(
     name = "cupti_headers",
     hdrs = [":cuda-extras"],
@@ -194,6 +199,14 @@ cc_import(
 cc_library(
     name = "libdevice_root",
     data = [":cuda-nvvm"],
+)
+
+filegroup(
+    name = "cuda_root",
+    srcs = [
+        "cuda/bin/fatbinary.exe",
+        "cuda/bin/bin2c.exe",
+    ],
 )
 
 bzl_library(

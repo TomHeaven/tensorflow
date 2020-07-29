@@ -55,6 +55,10 @@ class WrapperDataset : public DatasetBase {
 
   string DebugString() const override { return "WrapperDataset"; }
 
+  Status InputDatasets(std::vector<const DatasetBase*>* inputs) const override {
+    return Status::OK();
+  }
+
   Status CheckExternalState() const override { return Status::OK(); }
 
  protected:
@@ -243,6 +247,12 @@ class ChooseFastestBranchDatasetOp : public UnaryDatasetOpKernel {
       // TODO(rachelim): this might be wrong if the ratio is not fixed, for
       // example, from a BatchDataset with drop_remainder = False
       return static_cast<double>(n) * ratio_numerator_ / ratio_denominator_;
+    }
+
+    Status InputDatasets(
+        std::vector<const DatasetBase*>* inputs) const override {
+      inputs->push_back(input_);
+      return Status::OK();
     }
 
     Status CheckExternalState() const override {
@@ -495,9 +505,9 @@ class ChooseFastestBranchDatasetOp : public UnaryDatasetOpKernel {
         DatasetContext::Params params;
         params.type_string = "ChooseFastestBranch_Wrapper";
         params.node_name = strings::StrCat(params.type_string, branch_index);
-        DatasetBase* temp_dataset =
-            new WrapperDataset(std::move(params), &dataset()->output_types_,
-                               &dataset()->output_shapes_, input_impl_.get());
+        DatasetBase* temp_dataset = new WrapperDataset(
+            std::move(params), &input_impl_->output_dtypes(),
+            &input_impl_->output_shapes(), input_impl_.get());
 
         if (is_experiment) {
           // When running experiment iterations, we add a TakeDataset in between

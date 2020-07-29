@@ -14,6 +14,15 @@ package(
 
 exports_files(["LICENSE"])
 
+filegroup(
+    name = "all_py_srcs",
+    srcs = glob([
+        "*.py",
+        "**/*.py",
+    ]),
+    visibility = ["//tensorflow/python/keras/google/private_tf_api_test:__pkg__"],
+)
+
 py_library(
     name = "saving",
     srcs = [
@@ -44,10 +53,14 @@ py_library(
         "//tensorflow/python:tensor_spec",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/keras:backend",
+        "//tensorflow/python/keras:losses",
         "//tensorflow/python/keras:optimizers",
         "//tensorflow/python/keras:regularizers",
         "//tensorflow/python/keras/engine:input_spec",
+        "//tensorflow/python/keras/mixed_precision:autocast_variable",
+        "//tensorflow/python/keras/protobuf:saved_metadata_proto_py",
         "//tensorflow/python/keras/utils:engine_utils",
+        "//tensorflow/python/keras/utils:metrics_utils",
         "//tensorflow/python/keras/utils:mode_keys",
         "//tensorflow/python/saved_model",
         "//tensorflow/python/saved_model/model_utils",
@@ -61,6 +74,9 @@ tf_py_test(
     srcs = ["metrics_serialization_test.py"],
     python_version = "PY3",
     shard_count = 8,
+    tags = [
+        "notsan",  # TODO(b/170870790)
+    ],
     deps = [
         "//tensorflow/python:client_testlib",
         "//tensorflow/python/keras",
@@ -144,6 +160,7 @@ tf_py_test(
     tags = [
         "no_rocm",
         "no_windows",
+        "notap",  # TODO(b/161198218): flaky timeout
     ],
     deps = [
         "//tensorflow/python:client_testlib",
@@ -176,7 +193,7 @@ tf_py_test(
     size = "medium",
     srcs = ["saved_model/revive_test.py"],
     python_version = "PY3",
-    shard_count = 4,
+    shard_count = 8,
     tags = [
         "no_windows",  # b/158005583
     ],
@@ -193,7 +210,9 @@ tf_py_test(
     size = "small",
     srcs = ["saved_model/json_utils_test.py"],
     python_version = "PY3",
+    tfrt_enabled = True,
     deps = [
+        ":saving",
         "//tensorflow/python:client_testlib",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",

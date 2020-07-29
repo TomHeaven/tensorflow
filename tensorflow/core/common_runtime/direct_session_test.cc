@@ -1965,7 +1965,6 @@ static void TestSessionInterOpThreadsImpl(bool use_function_lib,
       ->set_constant_folding(RewriterConfig::OFF);
   (*options.config.mutable_device_count())["CPU"] = 2;
   (*options.config.mutable_device_count())["GPU"] = 0;
-  (*options.config.mutable_device_count())["SYCL"] = 0;
 
   auto* p = options.config.add_session_inter_op_thread_pool();
   if (use_global_pools) p->set_global_name("large pool");
@@ -2822,7 +2821,7 @@ class StatefulOutputRequiredOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override {
     // The op counts the number of outputs required in the current subgraph,
     // and emits that number on each of its required outputs.
-    Tensor count_outputs_required_t(0LL);
+    Tensor count_outputs_required_t(int64{0});
     int64& count_outputs_required = count_outputs_required_t.scalar<int64>()();
     for (int i = 0; i < num_outputs(); ++i) {
       if (ctx->output_required(i)) ++count_outputs_required;

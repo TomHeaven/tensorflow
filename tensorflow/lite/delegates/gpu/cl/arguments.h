@@ -20,8 +20,10 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "tensorflow/lite/delegates/gpu/cl/cl_device.h"
 #include "tensorflow/lite/delegates/gpu/cl/gpu_object.h"
 #include "tensorflow/lite/delegates/gpu/cl/opencl_wrapper.h"
+#include "tensorflow/lite/delegates/gpu/cl/serialization_generated.h"
 #include "tensorflow/lite/delegates/gpu/cl/util.h"
 #include "tensorflow/lite/delegates/gpu/common/access_type.h"
 #include "tensorflow/lite/delegates/gpu/common/status.h"
@@ -32,40 +34,40 @@ namespace tflite {
 namespace gpu {
 namespace cl {
 
-class Arguments {
+class ArgumentsBinder {
+ public:
+  virtual absl::Status SetInt(const std::string& name, int value) = 0;
+  virtual absl::Status SetFloat(const std::string& name, float value) = 0;
+  virtual absl::Status SetHalf(const std::string& name, half value) = 0;
+  virtual ~ArgumentsBinder() = default;
+};
+
+class Arguments : public ArgumentsBinder {
  public:
   Arguments() = default;
   void AddFloat(const std::string& name, float value = 0.0f);
   void AddHalf(const std::string& name, half value = half(0.0f));
   void AddInt(const std::string& name, int value = 0);
-  void AddBuffer(const std::string& name, const GPUBufferDescriptor& desc);
-  void AddImage2D(const std::string& name, const GPUImage2DDescriptor& desc);
-  void AddImage2DArray(const std::string& name,
-                       const GPUImage2DArrayDescriptor& desc);
-  void AddImage3D(const std::string& name, const GPUImage3DDescriptor& desc);
-  void AddImageBuffer(const std::string& name,
-                      const GPUImageBufferDescriptor& desc);
-
   void AddObjectRef(const std::string& name, AccessType access_type,
                     GPUObjectDescriptorPtr&& descriptor_ptr);
-  void AddObject(const std::string& name, AccessType access_type,
-                 GPUObjectPtr&& object);
+  void AddObject(const std::string& name,
+                 GPUObjectDescriptorPtr&& descriptor_ptr);
 
-  absl::Status SetInt(const std::string& name, int value);
-  absl::Status SetFloat(const std::string& name, float value);
-  absl::Status SetHalf(const std::string& name, half value);
-  absl::Status SetImage2D(const std::string& name, cl_mem memory);
-  absl::Status SetBuffer(const std::string& name, cl_mem memory);
-  absl::Status SetImage2DArray(const std::string& name, cl_mem memory);
-  absl::Status SetImage3D(const std::string& name, cl_mem memory);
-  absl::Status SetImageBuffer(const std::string& name, cl_mem memory);
+  absl::Status SetInt(const std::string& name, int value) override;
+  absl::Status SetFloat(const std::string& name, float value) override;
+  absl::Status SetHalf(const std::string& name, half value) override;
   absl::Status SetObjectRef(const std::string& name, const GPUObject* object);
 
-  std::string GetListOfArgs();
+  absl::Status Bind(cl_kernel kernel, int offset = 0);
 
-  absl::Status Bind(cl_kernel kernel, int offset);
+  void RenameArgs(const std::string& postfix, std::string* code) const;
+  absl::Status Merge(Arguments&& args, const std::string& postfix);
 
-  absl::Status TransformToCLCode(std::string* code);
+  absl::Status AllocateObjects(CLContext* context);
+  void ReleaseCPURepresentation();
+  absl::Status TransformToCLCode(
+      const DeviceInfo& device_info,
+      const std::map<std::string, std::string>& linkables, std::string* code);
 
   // Move only
   Arguments(Arguments&& args);
@@ -73,8 +75,35 @@ class Arguments {
   Arguments(const Arguments&) = delete;
   Arguments& operator=(const Arguments&) = delete;
 
+  ~Arguments() override = default;
+
  private:
-  std::string AddActiveArgument(const std::string& arg_name);
+  friend flatbuffers::Offset<data::Arguments> Encode(
+      const Arguments& args, flatbuffers::FlatBufferBuilder* builder);
+  friend absl::Status Decode(CLContext* context, const data::Arguments* fb_args,
+                             Arguments* args);
+
+  void AddBuffer(const std::string& name, const GPUBufferDescriptor& desc);
+  void AddImage2D(const std::string& name, const GPUImage2DDescriptor& desc);
+  void AddImage2DArray(const std::string& name,
+                       const GPUImage2DArrayDescriptor& desc);
+  void AddImage3D(const std::string& name, const GPUImage3DDescriptor& desc);
+  void AddImageBuffer(const std::string& name,
+                      const GPUImageBufferDescriptor& desc);
+  void AddCustomMemory(const std::string& name,
+                       const GPUCustomMemoryDescriptor& desc);
+
+  absl::Status SetImage2D(const std::string& name, cl_mem memory);
+  absl::Status SetBuffer(const std::string& name, cl_mem memory);
+  absl::Status SetImage2DArray(const std::string& name, cl_mem memory);
+  absl::Status SetImage3D(const std::string& name, cl_mem memory);
+  absl::Status SetImageBuffer(const std::string& name, cl_mem memory);
+  absl::Status SetCustomMemory(const std::string& name, cl_mem memory);
+
+  std::string GetListOfArgs();
+
+  std::string AddActiveArgument(const std::string& arg_name,
+                                bool use_f32_for_halfs);
   void AddGPUResources(const std::string& name, const GPUResources& resources);
 
   absl::Status SetGPUResources(const std::string& name,
@@ -82,18 +111,22 @@ class Arguments {
 
   absl::Status AddObjectArgs();
 
-  void ResolveArgsPass(std::string* code);
-  absl::Status ResolveSelectorsPass(std::string* code);
+  void ResolveArgsPass(const DeviceInfo& device_info, std::string* code);
+  absl::Status ResolveSelectorsPass(
+      const std::map<std::string, std::string>& linkables, std::string* code);
 
-  absl::Status ResolveSelector(const std::string& object_name,
-                               const std::string& selector,
-                               const std::vector<std::string>& args,
-                               const std::vector<std::string>& template_args,
-                               std::string* result);
+  absl::Status ResolveSelector(
+      const std::map<std::string, std::string>& linkables,
+      const std::string& object_name, const std::string& selector,
+      const std::vector<std::string>& args,
+      const std::vector<std::string>& template_args, std::string* result);
 
   void ResolveObjectNames(const std::string& object_name,
                           const std::vector<std::string>& member_names,
                           std::string* code);
+
+  GPUObjectDescriptor* GetObjectDescriptor(
+      const std::string& object_name) const;
 
   static constexpr char kArgsPrefix[] = "args.";
 
@@ -130,6 +163,9 @@ class Arguments {
     // to reduce amount of data transferred we adding this optimization
     bool active = false;
 
+    // some devices have issues with half parameters.
+    bool store_as_f32 = false;
+
     // offset to shared uniform storage.
     uint32_t offset = -1;
   };
@@ -141,16 +177,16 @@ class Arguments {
   std::map<std::string, GPUImage2DArrayDescriptor> image2d_arrays_;
   std::map<std::string, GPUImage3DDescriptor> images3d_;
   std::map<std::string, GPUImageBufferDescriptor> image_buffers_;
+  std::map<std::string, GPUCustomMemoryDescriptor> custom_memories_;
 
   struct ObjectRefArg {
-    AccessType access_type;
     GPUObjectDescriptorPtr descriptor;
   };
   std::map<std::string, ObjectRefArg> object_refs_;
 
   struct ObjectArg {
-    AccessType access_type;
     GPUObjectPtr obj_ptr;
+    GPUObjectDescriptorPtr descriptor;
   };
   std::map<std::string, ObjectArg> objects_;
 };

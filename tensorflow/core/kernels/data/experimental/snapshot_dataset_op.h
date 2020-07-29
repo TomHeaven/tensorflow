@@ -17,7 +17,6 @@ limitations under the License.
 #define TENSORFLOW_CORE_KERNELS_DATA_EXPERIMENTAL_SNAPSHOT_DATASET_OP_H_
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/strings/str_format.h"
 #include "tensorflow/core/framework/dataset.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op_requires.h"
@@ -45,6 +44,9 @@ class SnapshotDatasetV2Op : public UnaryDatasetOpKernel {
   static constexpr const char* const kOutputTypes = "output_types";
   static constexpr const char* const kOutputShapes = "output_shapes";
   static constexpr const char* const kCompression = "compression";
+  static constexpr const char* const kReaderPrefix = "reader_prefix";
+  static constexpr const char* const kWriterPrefix = "writer_prefix";
+  static constexpr const char* const kCompressionAuto = "AUTO";
   static constexpr const char* const kReaderFunc = "reader_func";
   static constexpr const char* const kShardFunc = "shard_func";
   static constexpr const char* const kReaderFuncOtherArgs =
@@ -71,6 +73,8 @@ class SnapshotDatasetV2Op : public UnaryDatasetOpKernel {
   std::vector<PartialTensorShape> output_shapes_;
 
   std::string compression_;
+  std::string reader_prefix_;
+  std::string writer_prefix_;
 
   std::shared_ptr<FunctionMetadata> reader_func_metadata_;
   std::shared_ptr<FunctionMetadata> shard_func_metadata_;

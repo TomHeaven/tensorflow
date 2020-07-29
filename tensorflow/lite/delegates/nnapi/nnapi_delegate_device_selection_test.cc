@@ -31,7 +31,6 @@ limitations under the License.
 #include "tensorflow/lite/delegates/nnapi/nnapi_delegate_mock_test.h"
 #include "tensorflow/lite/interpreter.h"
 #include "tensorflow/lite/kernels/test_util.h"
-#include "tensorflow/lite/minimal_logging.h"
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/nnapi/NeuralNetworksTypes.h"
 #include "tensorflow/lite/nnapi/nnapi_implementation.h"
@@ -271,7 +270,10 @@ class ArgMaxOpModel : public SingleOpModel, public AcceleratedModel {
 
     SetBuiltinOp(BuiltinOperator_ARG_MAX, BuiltinOptions_ArgMaxOptions,
                  CreateArgMaxOptions(builder_, output_type).Union());
-    BuildInterpreter({input_shape, {1}});
+    BuildInterpreter({input_shape, {1}}, /*num_threads*/ -1,
+                     /*allow_fp32_relax_to_fp16=*/false,
+                     /*apply_delegate=*/false);
+    ApplyDelegate();
   }
 };
 
@@ -411,7 +413,8 @@ class AddSubOpsAcceleratedModel : public MultiOpModel, public AcceleratedModel {
                  {add_output, input3_}, {output_});
     BuildInterpreter({GetShape(input1_), GetShape(input2_), GetShape(input3_)},
                      /*num_threads=*/-1, allow_fp32_relax_to_fp16,
-                     /*apply_delegate=*/true);
+                     /*apply_delegate=*/false);
+    ApplyDelegate();
   }
 };
 
@@ -592,7 +595,8 @@ class HardSwishAddOpsAcceleratedModel : public MultiOpModel,
                  CreateAddOptions(builder_, activation_type).Union(),
                  {input1_, hard_swish_output}, {output_});
     BuildInterpreter({GetShape(input1_), GetShape(input2_)}, /*num_threads=*/-1,
-                     allow_fp32_relax_to_fp16, /*apply_delegate=*/true);
+                     allow_fp32_relax_to_fp16, /*apply_delegate=*/false);
+    ApplyDelegate();
   }
 };
 
@@ -722,7 +726,8 @@ class QuantizedWeightsConvolutionOpModel : public SingleOpModel,
 
     BuildInterpreter({GetShape(input_), GetShape(filter_), GetShape(bias_)},
                      num_threads, /*allow_fp32_relax_to_fp16=*/false,
-                     /*apply_delegate=*/true);
+                     /*apply_delegate=*/false);
+    ApplyDelegate();
   }
 
   void SetInput(std::initializer_list<float> data) {
@@ -868,7 +873,11 @@ class LongIdentityModel : public MultiOpModel, public AcceleratedModel {
         {intermediate_outputs[intermediate_outputs.size() - 1], zero_input_},
         {output_});
 
-    BuildInterpreter({GetShape(input_), GetShape(zero_input_)});
+    BuildInterpreter({GetShape(input_), GetShape(zero_input_)},
+                     /*num_threads*/ -1,
+                     /*allow_fp32_relax_to_fp16=*/false,
+                     /*apply_delegate=*/false);
+    ApplyDelegate();
 
     std::vector<float> zero(GetTensorSize(input_), 0.0);
     PopulateTensor(zero_input_, zero);

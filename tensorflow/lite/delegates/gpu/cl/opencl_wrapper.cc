@@ -15,7 +15,15 @@ limitations under the License.
 
 #include "tensorflow/lite/delegates/gpu/cl/opencl_wrapper.h"
 
+#if defined(_WIN32)
+#define __WINDOWS__
+#endif
+
+#ifdef __WINDOWS__
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 #include <string>
 
@@ -28,17 +36,39 @@ namespace cl {
 
 #ifdef __ANDROID__
 #define LoadFunction(function)                                                 \
-  if (is_pixel) {                                                              \
+  if (use_wrapper) {                                                           \
     function = reinterpret_cast<PFN_##function>(loadOpenCLPointer(#function)); \
   } else {                                                                     \
     function = reinterpret_cast<PFN_##function>(dlsym(libopencl, #function));  \
   }
+#elif defined(__WINDOWS__)
+#define LoadFunction(function) \
+  function =                   \
+      reinterpret_cast<PFN_##function>(GetProcAddress(libopencl, #function));
 #else
 #define LoadFunction(function) \
   function = reinterpret_cast<PFN_##function>(dlsym(libopencl, #function));
 #endif
 
+#ifdef __WINDOWS__
+void LoadOpenCLFunctions(HMODULE libopencl);
+#else
+void LoadOpenCLFunctions(void* libopencl, bool use_wrapper);
+#endif
+
 absl::Status LoadOpenCL() {
+#ifdef __WINDOWS__
+  HMODULE libopencl = LoadLibraryA("OpenCL.dll");
+  if (libopencl) {
+    LoadOpenCLFunctions(libopencl);
+    return absl::OkStatus();
+  } else {
+    DWORD error_code = GetLastError();
+    return absl::UnknownError(absl::StrCat(
+        "Can not open OpenCL library on this device, error code - ",
+        error_code));
+  }
+#else
   void* libopencl = dlopen("libOpenCL.so", RTLD_NOW | RTLD_LOCAL);
   if (libopencl) {
     LoadOpenCLFunctions(libopencl, false);
@@ -47,8 +77,11 @@ absl::Status LoadOpenCL() {
   // record error
   std::string error(dlerror());
 #ifdef __ANDROID__
-  // Pixel phone?
+  // Pixel phone or auto?
   libopencl = dlopen("libOpenCL-pixel.so", RTLD_NOW | RTLD_LOCAL);
+  if (!libopencl) {
+    libopencl = dlopen("libOpenCL-car.so", RTLD_NOW | RTLD_LOCAL);
+  }
   if (libopencl) {
     typedef void (*enableOpenCL_t)();
     enableOpenCL_t enableOpenCL =
@@ -60,16 +93,21 @@ absl::Status LoadOpenCL() {
 #endif
   return absl::UnknownError(
       absl::StrCat("Can not open OpenCL library on this device - ", error));
+#endif
 }
 
-void LoadOpenCLFunctions(void* libopencl, bool is_pixel) {
+#ifdef __WINDOWS__
+void LoadOpenCLFunctions(HMODULE libopencl) {
+#else
+void LoadOpenCLFunctions(void* libopencl, bool use_wrapper) {
 #ifdef __ANDROID__
   typedef void* (*loadOpenCLPointer_t)(const char* name);
   loadOpenCLPointer_t loadOpenCLPointer;
-  if (is_pixel) {
+  if (use_wrapper) {
     loadOpenCLPointer = reinterpret_cast<loadOpenCLPointer_t>(
         dlsym(libopencl, "loadOpenCLPointer"));
   }
+#endif
 #endif
 
   LoadFunction(clGetPlatformIDs);

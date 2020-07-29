@@ -16,11 +16,14 @@ limitations under the License.
 #define TENSORFLOW_COMPILER_MLIR_LITE_PYTHON_TF_TFL_FLATBUFFER_HELPERS_H_
 
 #include <ostream>
+#include <unordered_set>
 #include <utility>
 
+#include "llvm/ADT/Optional.h"
 #include "mlir/IR/Module.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/common/tfl_pass_config.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"
+#include "tensorflow/core/public/session.h"
 #include "tensorflow/lite/toco/model_flags.pb.h"
 #include "tensorflow/lite/toco/toco_flags.pb.h"
 #include "tensorflow/lite/toco/types.pb.h"
@@ -44,10 +47,11 @@ Status PopulateQuantizationSpecs(
 
 // Convert imported MLIR file to TfLite flatbuffer.
 // This will also run relevant passes as well.
-Status ConvertMLIRToTFLiteFlatBuffer(const toco::TocoFlags& toco_flags,
-                                     mlir::OwningModuleRef module,
-                                     const mlir::TFL::PassConfig& pass_config,
-                                     string* result);
+Status ConvertMLIRToTFLiteFlatBuffer(
+    const toco::TocoFlags& toco_flags, mlir::OwningModuleRef module,
+    const mlir::TFL::PassConfig& pass_config,
+    const std::unordered_set<std::string>& saved_model_tags, string* result,
+    llvm::Optional<tensorflow::Session*> session);
 
 // Give a warning for any unused flags that have been specified.
 void WarningUnusedFlags(const toco::ModelFlags& model_flags,
