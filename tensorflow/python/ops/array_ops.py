@@ -505,16 +505,20 @@ setdiff1d.__doc__ = gen_array_ops.list_diff.__doc__
 def broadcast_dynamic_shape(shape_x, shape_y):
   """Computes the shape of a broadcast given symbolic shapes.
 
-  When shape_x and shape_y are Tensors representing shapes (i.e. the result of
-  calling tf.shape on another Tensor) this computes a Tensor which is the shape
-  of the result of a broadcasting op applied in tensors of shapes shape_x and
-  shape_y.
-
-  For example, if shape_x is [1, 2, 3] and shape_y is [5, 1, 3], the result is a
-  Tensor whose value is [5, 2, 3].
+  When `shape_x` and `shape_y` are Tensors representing shapes (i.e. the result
+  of calling tf.shape on another Tensor) this computes a Tensor which is the
+  shape of the result of a broadcasting op applied in tensors of shapes
+  `shape_x` and `shape_y`.
 
   This is useful when validating the result of a broadcasting operation when the
   tensors do not have statically known shapes.
+
+  Example:
+
+  >>> shape_x = (1, 2, 3)
+  >>> shape_y = (5, 1, 3)
+  >>> tf.broadcast_dynamic_shape(shape_x, shape_y)
+  <tf.Tensor: shape=(3,), dtype=int32, numpy=array([5, 2, 3], ...>
 
   Args:
     shape_x: A rank 1 integer `Tensor`, representing the shape of x.
@@ -522,6 +526,10 @@ def broadcast_dynamic_shape(shape_x, shape_y):
 
   Returns:
     A rank 1 integer `Tensor` representing the broadcasted shape.
+
+  Raises:
+    InvalidArgumentError: If the two shapes are incompatible for
+    broadcasting.
   """
   return gen_array_ops.broadcast_args(shape_x, shape_y)
 
@@ -531,15 +539,23 @@ def broadcast_dynamic_shape(shape_x, shape_y):
 def broadcast_static_shape(shape_x, shape_y):
   """Computes the shape of a broadcast given known shapes.
 
-  When shape_x and shape_y are fully known TensorShapes this computes a
-  TensorShape which is the shape of the result of a broadcasting op applied in
-  tensors of shapes shape_x and shape_y.
+  When `shape_x` and `shape_y` are fully known `TensorShape`s this computes a
+  `TensorShape` which is the shape of the result of a broadcasting op applied in
+  tensors of shapes `shape_x` and `shape_y`.
 
-  For example, if shape_x is [1, 2, 3] and shape_y is [5, 1, 3], the result is a
-  TensorShape whose value is [5, 2, 3].
+  For example, if shape_x is `TensorShape([1, 2, 3])` and shape_y is
+  `TensorShape([5, 1, 3])`, the result is a TensorShape whose value is
+  `TensorShape([5, 2, 3])`.
 
   This is useful when validating the result of a broadcasting operation when the
   tensors have statically known shapes.
+
+  Example:
+
+  >>> shape_x = tf.TensorShape([1, 2, 3])
+  >>> shape_y = tf.TensorShape([5, 1 ,3])
+  >>> tf.broadcast_static_shape(shape_x, shape_y)
+  TensorShape([5, 2, 3])
 
   Args:
     shape_x: A `TensorShape`
@@ -558,13 +574,18 @@ def broadcast_static_shape(shape_x, shape_y):
 @dispatch.add_dispatch_support
 def shape_v2(input, out_type=dtypes.int32, name=None):
   # pylint: disable=redefined-builtin
-  """Returns the shape of a tensor.
-  
+  """Returns a tensor containing the shape of the input tensor.
+
   See also `tf.size`, `tf.rank`.
 
   `tf.shape` returns a 1-D integer tensor representing the shape of `input`.
+  For a scalar input, the tensor returned has a shape of (0,) and its value is
+  the empty vector (i.e. []).
 
   For example:
+
+  >>> tf.shape(1.)
+  <tf.Tensor: shape=(0,), dtype=int32, numpy=array([], dtype=int32)>
 
   >>> t = tf.constant([[[1, 1, 1], [2, 2, 2]], [[3, 3, 3], [4, 4, 4]]])
   >>> tf.shape(t)
@@ -575,13 +596,13 @@ def shape_v2(input, out_type=dtypes.int32, name=None):
 
   >>> a = tf.keras.layers.Input((None, 10))
   >>> tf.shape(a)
-  <tf.Tensor ... shape=(3,) dtype=int32>
+  <... shape=(3,) dtype=int32...>
 
   In these cases, using `tf.Tensor.shape` will return more informative results.
 
   >>> a.shape
   TensorShape([None, None, 10])
-  
+
   (The first `None` represents the as yet unknown batch size.)
 
   `tf.shape` and `Tensor.shape` should be identical in eager mode.  Within
@@ -939,6 +960,8 @@ def _slice_helper(tensor, slice_spec, var=None):
     TypeError: If the slice indices aren't int, slice, ellipsis,
       tf.newaxis or scalar int32/int64 tensors.
   """
+  tensor = ops.convert_to_tensor(tensor)
+
   if isinstance(slice_spec, bool) or \
   (isinstance(slice_spec, ops.Tensor) and slice_spec.dtype == dtypes.bool) or \
   (isinstance(slice_spec, np.ndarray) and slice_spec.dtype == bool):
@@ -1661,13 +1684,6 @@ def boolean_mask(tensor, mask, name="boolean_mask", axis=None):
 
   Numpy equivalent is `tensor[mask]`.
 
-  ```python
-  # 1-D example
-  tensor = [0, 1, 2, 3]
-  mask = np.array([True, False, True, False])
-  boolean_mask(tensor, mask)  # [0, 2]
-  ```
-
   In general, `0 < dim(mask) = K <= dim(tensor)`, and `mask`'s shape must match
   the first K dimensions of `tensor`'s shape.  We then have:
     `boolean_mask(tensor, mask)[i, j1,...,jd] = tensor[i1,...,iK,j1,...,jd]`
@@ -1680,9 +1696,23 @@ def boolean_mask(tensor, mask, name="boolean_mask", axis=None):
   ragged tensors, and can be used if you need to preserve the masked dimensions
   of `tensor` (rather than flattening them, as `tf.boolean_mask` does).
 
+  Examples:
+
+  ```python
+  # 1-D example
+  tensor = [0, 1, 2, 3]
+  mask = np.array([True, False, True, False])
+  tf.boolean_mask(tensor, mask)  # [0, 2]
+
+  # 2-D example
+  tensor = [[1, 2], [3, 4], [5, 6]]
+  mask = np.array([True, False, True])
+  tf.boolean_mask(tensor, mask)  # [[1, 2], [5, 6]]
+  ```
+
   Args:
-    tensor:  N-D tensor.
-    mask:  K-D boolean tensor, K <= N and K must be known statically.
+    tensor:  N-D Tensor.
+    mask:  K-D boolean Tensor, K <= N and K must be known statically.
     name:  A name for this operation (optional).
     axis:  A 0-D int Tensor representing the axis in `tensor` to mask from. By
       default, axis is 0 which will mask from the first dimension. Otherwise K +
@@ -1694,15 +1724,6 @@ def boolean_mask(tensor, mask, name="boolean_mask", axis=None):
 
   Raises:
     ValueError:  If shapes do not conform.
-
-  Examples:
-
-  ```python
-  # 2-D example
-  tensor = [[1, 2], [3, 4], [5, 6]]
-  mask = np.array([True, False, True])
-  boolean_mask(tensor, mask)  # [[1, 2], [5, 6]]
-  ```
   """
 
   def _apply_mask_1d(reshaped_tensor, mask, axis=None):
@@ -1757,13 +1778,6 @@ def boolean_mask_v2(tensor, mask, axis=None, name="boolean_mask"):
 
   Numpy equivalent is `tensor[mask]`.
 
-  ```python
-  # 1-D example
-  tensor = [0, 1, 2, 3]
-  mask = np.array([True, False, True, False])
-  boolean_mask(tensor, mask)  # [0, 2]
-  ```
-
   In general, `0 < dim(mask) = K <= dim(tensor)`, and `mask`'s shape must match
   the first K dimensions of `tensor`'s shape.  We then have:
     `boolean_mask(tensor, mask)[i, j1,...,jd] = tensor[i1,...,iK,j1,...,jd]`
@@ -1776,9 +1790,23 @@ def boolean_mask_v2(tensor, mask, axis=None, name="boolean_mask"):
   ragged tensors, and can be used if you need to preserve the masked dimensions
   of `tensor` (rather than flattening them, as `tf.boolean_mask` does).
 
+  Examples:
+
+  >>> tensor = [0, 1, 2, 3]  # 1-D example
+  >>> mask = np.array([True, False, True, False])
+  >>> tf.boolean_mask(tensor, mask)
+  <tf.Tensor: shape=(2,), dtype=int32, numpy=array([0, 2], dtype=int32)>
+
+  >>> tensor = [[1, 2], [3, 4], [5, 6]] # 2-D example
+  >>> mask = np.array([True, False, True])
+  >>> tf.boolean_mask(tensor, mask)
+  <tf.Tensor: shape=(2, 2), dtype=int32, numpy=
+  array([[1, 2],
+         [5, 6]], dtype=int32)>
+
   Args:
-    tensor:  N-D tensor.
-    mask:  K-D boolean tensor, K <= N and K must be known statically.
+    tensor:  N-D Tensor.
+    mask:  K-D boolean Tensor, K <= N and K must be known statically.
     axis:  A 0-D int Tensor representing the axis in `tensor` to mask from. By
       default, axis is 0 which will mask from the first dimension. Otherwise K +
       axis <= N.
@@ -2449,7 +2477,6 @@ def matrix_diag(diagonal,
 @tf_export("linalg.diag_part", v1=["linalg.diag_part", "matrix_diag_part"])
 @dispatch.add_dispatch_support
 @deprecation.deprecated_endpoints("matrix_diag_part")
-@dispatch.add_dispatch_support
 def matrix_diag_part(
     input,  # pylint:disable=redefined-builtin
     name="diag_part",
@@ -2585,6 +2612,51 @@ def matrix_diag_part(
 
   return gen_array_ops.matrix_diag_part_v3(
       input=input, k=k, padding_value=padding_value, align=align, name=name)
+
+
+@tf_export(
+    "linalg.tensor_diag_part", v1=["linalg.tensor_diag_part", "diag_part"])
+@dispatch.add_dispatch_support
+@deprecation.deprecated_endpoints("diag_part")
+def tensor_diag_part(
+    input,  # pylint:disable=redefined-builtin
+    name=None):
+  """Returns the diagonal part of the tensor.
+
+  This operation returns a tensor with the `diagonal` part
+  of the `input`. The `diagonal` part is computed as follows:
+
+  Assume `input` has dimensions `[D1,..., Dk, D1,..., Dk]`, then the output is a
+  tensor of rank `k` with dimensions `[D1,..., Dk]` where:
+
+  `diagonal[i1,..., ik] = input[i1, ..., ik, i1,..., ik]`.
+
+  For a rank 2 tensor, `linalg.diag_part` and `linalg.tensor_diag_part`
+  produce the same result. For rank 3 and higher, linalg.diag_part extracts
+  the diagonal of each inner-most matrix in the tensor. An example where
+  they differ is given below.
+
+  >>> x = [[[[1111,1112],[1121,1122]],
+  ...       [[1211,1212],[1221,1222]]],
+  ...      [[[2111, 2112], [2121, 2122]],
+  ...       [[2211, 2212], [2221, 2222]]]
+  ...      ]
+  >>> tf.linalg.tensor_diag_part(x)
+  <tf.Tensor: shape=(2, 2), dtype=int32, numpy=
+  array([[1111, 1212],
+         [2121, 2222]], dtype=int32)>
+  >>> tf.linalg.diag_part(x).shape
+  TensorShape([2, 2, 2])
+
+  Args:
+    input: A `Tensor` with rank `2k`.
+    name: A name for the operation (optional).
+
+  Returns:
+    A Tensor containing diagonals of `input`. Has the same type as `input`, and
+    rank `k`.
+  """
+  return gen_array_ops.diag_part(input=input, name=name)
 
 
 @tf_export("linalg.set_diag", v1=["linalg.set_diag", "matrix_set_diag"])
@@ -2783,6 +2855,8 @@ def zeros(shape, dtype=dtypes.float32, name=None):
       zero = False
     elif dtype == dtypes.string:
       zero = ""
+    elif dtype.is_quantized:
+      zero = np.zeros([]).astype(dtype.as_numpy_dtype)
     else:
       zero = 0
 
@@ -3032,7 +3106,12 @@ def ones(shape, dtype=dtypes.float32, name=None):
   """
   dtype = dtypes.as_dtype(dtype).base_dtype
   with ops.name_scope(name, "ones", [shape]) as name:
-    one = True if dtype == dtypes.bool else 1
+    if dtype == dtypes.bool:
+      one = True
+    elif dtype.is_quantized:
+      one = np.ones([]).astype(dtype.as_numpy_dtype)
+    else:
+      one = 1
     if not isinstance(shape, ops.Tensor):
       try:
         if not context.executing_eagerly():
@@ -3548,7 +3627,37 @@ def edit_distance(hypothesis, truth, normalize=True, name="edit_distance"):
   You can normalize the edit distance by length of `truth` by setting
   `normalize` to true.
 
-  For example, given the following input:
+  For example:
+
+  Given the following input,
+  * `hypothesis` is a `tf.SparseTensor` of shape `[2, 1, 1]`
+  * `truth` is a `tf.SparseTensor` of shape `[2, 2, 2]`
+
+  >>> hypothesis = tf.SparseTensor(
+  ...   [[0, 0, 0],
+  ...    [1, 0, 0]],
+  ...   ["a", "b"],
+  ...   (2, 1, 1))
+  >>> truth = tf.SparseTensor(
+  ...   [[0, 1, 0],
+  ...    [1, 0, 0],
+  ...    [1, 0, 1],
+  ...    [1, 1, 0]],
+  ...    ["a", "b", "c", "a"],
+  ...    (2, 2, 2))
+  >>> tf.edit_distance(hypothesis, truth, normalize=True)
+  <tf.Tensor: shape=(2, 2), dtype=float32, numpy=
+  array([[inf, 1. ],
+         [0.5, 1. ]], dtype=float32)>
+
+  The operaton returns a dense Tensor of shape `[2, 2]` with
+  edit distances normalized by `truth` lengths.
+
+  **Note**: It is possible to calculate edit distance between two
+  sparse tensors with variable-length values. However, attempting to create
+  them while eager execution is enabled will result in a `ValueError`.
+
+  For the following  inputs,
 
   ```python
   # 'hypothesis' is a tensor of shape `[2, 1]` with variable-length values:
@@ -3574,15 +3683,10 @@ def edit_distance(hypothesis, truth, normalize=True, name="edit_distance"):
       (2, 2, 2))
 
   normalize = True
-  ```
 
-  This operation would return the following:
-
-  ```python
-  # 'output' is a tensor of shape `[2, 2]` with edit distances normalized
-  # by 'truth' lengths.
-  output ==> [[inf, 1.0],  # (0,0): no truth, (0,1): no hypothesis
-             [0.5, 1.0]]  # (1,0): addition, (1,1): no hypothesis
+  # The output would be a dense Tensor of shape `(2,)`, with edit distances
+  noramlized by 'truth' lengths.
+  # output => array([0., 0.5], dtype=float32)
   ```
 
   Args:
@@ -3652,6 +3756,23 @@ def _FakeQuantWithMinMaxVarsPerChannelGradient(op, grad):
       op.inputs[2],
       num_bits=op.get_attr("num_bits"),
       narrow_range=op.get_attr("narrow_range"))
+
+
+@ops.RegisterGradient("QuantizeAndDequantizeV4")
+def _QuantizeAndDequantizeV4Grad(op, grad):
+  """Gradient for QuantizeAndDequantizeV4 op."""
+  return quantize_and_dequantize_v4_grad(
+      grad,
+      op.inputs[0],
+      op.inputs[1],
+      op.inputs[2],
+      axis=op.get_attr("axis"))
+
+
+@ops.RegisterGradient("QuantizeAndDequantizeV4Grad")
+def _QuantizeAndDequantizeV4GradGrad(op, grad):
+  """Gradient for QuantizeAndDequantizeV4Grad op."""
+  return _QuantizeAndDequantizeV4Grad(op, grad)
 
 
 @tf_export("required_space_to_batch_paddings")
@@ -4197,8 +4318,7 @@ def sequence_mask(lengths, maxlen=None, dtype=dtypes.bool, name=None):
     # authoritative type. Whenever maxlen fits into tf.int32, so do the lengths.
     matrix = gen_math_ops.cast(expand_dims(lengths, -1), maxlen.dtype)
     result = row_vector < matrix
-
-    if dtype is None or result.dtype.base_dtype == dtype.base_dtype:
+    if dtype is None or result.dtype.is_compatible_with(dtype):
       return result
     else:
       return gen_math_ops.cast(result, dtype)
@@ -4412,7 +4532,7 @@ def where_v2(condition, x=None, y=None, name=None):
 
   The `condition` tensor acts as a mask that chooses whether the corresponding
   element / row in the output should be taken from `x`
-  (if the element in `condition is True) or `y` (if it is false).
+  (if the element in `condition` is True) or `y` (if it is false).
 
   >>> tf.where([True, False, False, True], [1,2,3,4], [100,200,300,400])
   <tf.Tensor: shape=(4,), dtype=int32, numpy=array([  1, 200, 300,   4],
@@ -4434,11 +4554,28 @@ def where_v2(condition, x=None, y=None, name=None):
   <tf.Tensor: shape=(4,), dtype=int32, numpy=array([100, 100, 100, 100],
   dtype=int32)>
 
+  Note that if the gradient of either branch of the tf.where generates
+  a NaN, then the gradient of the entire tf.where will be NaN.
+  A workaround is to use an inner tf.where to ensure the function has
+  no asymptote, and to avoid computing a value whose gradient is NaN by
+  replacing dangerous inputs with safe inputs.
+
+  Instead of this,
+
+  >>> y = tf.constant(-1, dtype=tf.float32)
+  >>> tf.where(y > 0, tf.sqrt(y), y)
+  <tf.Tensor: shape=(), dtype=float32, numpy=-1.0>
+
+  Use this
+
+  >>> tf.where(y > 0, tf.sqrt(tf.where(y > 0, y, 1)), y)
+  <tf.Tensor: shape=(), dtype=float32, numpy=-1.0>
+
   Args:
     condition: A `tf.Tensor` of type `bool`
     x: If provided, a Tensor which is of the same type as `y`, and has a shape
       broadcastable with `condition` and `y`.
-    y: If provided, a Tensor which is of the same type as `y`, and has a shape
+    y: If provided, a Tensor which is of the same type as `x`, and has a shape
       broadcastable with `condition` and `x`.
     name: A name of the operation (optional).
 
@@ -5088,6 +5225,293 @@ def batch_gather_nd(params, indices, batch_dims, name=None):
   return out
 
 
+@deprecation.deprecated_endpoints("tensor_scatter_update")
+@tf_export(
+    "tensor_scatter_nd_update",
+    v1=["tensor_scatter_nd_update", "tensor_scatter_update"])
+@dispatch.add_dispatch_support
+def tensor_scatter_nd_update(tensor, indices, updates, name=None):
+  """"Scatter `updates` into an existing tensor according to `indices`.
+
+  This operation creates a new tensor by applying sparse `updates` to the
+  input `tensor`. This is similar to an index assignment.
+
+  ```
+  # Not implemented: tensors cannot be updated inplace.
+  tensor[indices] = updates
+  ```
+
+  If an out of bound index is found on CPU, an error is returned.
+
+  > **WARNING**: There are some GPU specific semantics for this operation.
+  >
+  > - If an out of bound index is found, the index is ignored.
+  > - The order in which updates are applied is nondeterministic, so the output
+  >   will be nondeterministic if `indices` contains duplicates.
+
+  This operation is very similar to `tf.scatter_nd`, except that the updates are
+  scattered onto an existing tensor (as opposed to a zero-tensor). If the memory
+  for the existing tensor cannot be re-used, a copy is made and updated.
+
+  In general:
+
+  * `indices` is an integer tensor - the indices to update in `tensor`.
+  * `indices` has **at least two** axes, the last axis is the depth of the
+    index vectors.
+  * For each index vector in `indices` there is a corresponding entry in
+    `updates`.
+  * If the length of the index vectors matches the rank of the `tensor`, then
+    the index vectors each point to scalars in `tensor` and each update is a
+    scalar.
+  * If the length of the index vectors is less than the rank of `tensor`, then
+    the index vectors each point to slices of `tensor` and shape of the updates
+    must match that slice.
+
+  Overall this leads to the following shape constraints:
+
+  ```
+  assert tf.rank(indices) >= 2
+  index_depth = indices.shape[-1]
+  batch_shape = indices.shape[:-1]
+  assert index_depth <= tf.rank(tensor)
+  outer_shape = tensor.shape[:index_depth]
+  inner_shape = tensor.shape[index_depth:]
+  assert updates.shape == batch_shape + inner_shape
+  ```
+
+  Typical usage is often much simpler than this general form, and it
+  can be better understood starting with simple examples:
+
+  ### Scalar updates
+
+  The simplest usage inserts scalar elements into a tensor by index.
+  In this case, the `index_depth` must equal the rank of the
+  input `tensor`, slice each column of `indices` is an index into an axis of the
+  input `tensor`.
+
+  In this simplest case the shape constraints are:
+
+  ```
+  num_updates, index_depth = indices.shape.as_list()
+  assert updates.shape == [num_updates]
+  assert index_depth == tf.rank(tensor)`
+  ```
+
+  For example, to insert 4 scattered elements in a rank-1 tensor with
+  8 elements.
+
+  <div style="width:70%; margin:auto; margin-bottom:10px; margin-top:20px;">
+  <img style="width:100%"
+    src="https://www.tensorflow.org/images/ScatterNd1.png">
+  </div>
+
+  This scatter operation would look like this:
+
+  >>> tensor = [0, 0, 0, 0, 0, 0, 0, 0]    # tf.rank(tensor) == 1
+  >>> indices = [[1], [3], [4], [7]]       # num_updates == 4, index_depth == 1
+  >>> updates = [9, 10, 11, 12]            # num_updates == 4
+  >>> print(tf.tensor_scatter_nd_update(tensor, indices, updates))
+  tf.Tensor([ 0 9  0 10  11  0  0 12], shape=(8,), dtype=int32)
+
+  The length (first axis) of `updates` must equal the length of the `indices`:
+  `num_updates`. This is the the number of updates being inserted. Each
+  scalar update is inserted into `tensor` at the indexed location.
+
+  For a higher rank input `tensor` scalar updates can be inserted by using an
+  `index_depth` that matches `tf.rank(tensor)`:
+
+  >>> tensor = [[1, 1], [1, 1], [1, 1]]    # tf.rank(tensor) == 2
+  >>> indices = [[0, 1], [2, 0]]           # num_updates == 2, index_depth == 2
+  >>> updates = [5, 10]                    # num_updates == 2
+  >>> print(tf.tensor_scatter_nd_update(tensor, indices, updates))
+  tf.Tensor(
+      [[ 1  5]
+       [ 1  1]
+       [10  1]], shape=(3, 2), dtype=int32)
+
+  ### Slice updates
+
+  When the input `tensor` has more than one axis scatter can be used to update
+  entire slices.
+
+  In this case it's helpful to think of the input `tensor` as being a two level
+  array-of-arrays. The shape of this two level array is split into the
+  `outer_shape` and the `inner_shape`.
+
+  `indices` indexes into the outer level of the input tensor (`outer_shape`).
+  and replaces the sub-array at that location with the coresponding item from
+  the `updates` list. The shape of each update is `inner_shape`.
+
+  When updating a list of slices the shape constraints are:
+
+  ```
+  num_updates, index_depth = indices.shape.as_list()
+  inner_shape = tensor.shape[:index_depth]
+  outer_shape = tensor.shape[index_depth:]
+  assert updates.shape == [num_updates, inner_shape]
+  ```
+
+  For example, to update rows of a `(6, 3)` `tensor`:
+
+  >>> tensor = tf.zeros([6, 3], dtype=tf.int32)
+
+  Use an index depth of one.
+
+  >>> indices = tf.constant([[2], [4]])     # num_updates == 2, index_depth == 1
+  >>> num_updates, index_depth = indices.shape.as_list()
+
+  The `outer_shape` is `6`, the inner shape is `3`:
+
+  >>> outer_shape = tensor.shape[:index_depth]
+  >>> inner_shape = tensor.shape[index_depth:]
+
+  2 rows are being indexed so 2 `updates` must be supplied.
+  Each update must be shaped to match the `inner_shape`.
+
+  >>> # num_updates == 2, inner_shape==3
+  >>> updates = tf.constant([[1, 2, 3],
+  ...                        [4, 5, 6]])
+
+  Alltogether this gives:
+
+  >>> tf.tensor_scatter_nd_update(tensor, indices, updates).numpy()
+  array([[0, 0, 0],
+         [0, 0, 0],
+         [1, 2, 3],
+         [0, 0, 0],
+         [4, 5, 6],
+         [0, 0, 0]], dtype=int32)
+
+  #### More slice update examples
+
+  A tensor representing a batch of uniformly sized video clips naturally has 5
+  axes: `[batch_size, time, width, height, channels]`.
+
+  For example:
+
+  >>> batch_size, time, width, height, channels = 13,11,7,5,3
+  >>> video_batch = tf.zeros([batch_size, time, width, height, channels])
+
+  To replace a selection of video clips:
+    * Use an `index_depth` of 1 (indexing the `outer_shape`: `[batch_size]`)
+    * Provide updates each with a shape matching the `inner_shape`:
+      `[time, width, height, channels]`.
+
+  To relace the first two clips with ones:
+
+  >>> indices = [[0],[1]]
+  >>> new_clips = tf.ones([2, time, width, height, channels])
+  >>> tf.tensor_scatter_nd_update(video_batch, indices, new_clips)
+
+  To replace a selection of frames in the videos:
+
+  * `indices` must have an `index_depth` of 2 for the `outer_shape`:
+    `[batch_size, time]`.
+  * `updates` must be shaped like a list of images.  Each update must have a
+    shape, matching the `inner_shape`: `[width, height, channels]`.
+
+  To replace the first frame of the first three video clips:
+
+  >>> indices = [[0, 0], [1, 0], [2, 0]] # num_updates=3, index_depth=2
+  >>> new_images = tf.ones([
+  ...   # num_updates=3, inner_shape=(width, height, channels)
+  ...   3, width, height, channels])
+  >>> tf.tensor_scatter_nd_update(video_batch, indices, new_images)
+
+  ### Folded indices
+
+  In simple cases it's convienient to think of `indices` and `updates` as
+  lists, but this is not a strict requirement. Instead of a flat `num_updates`,
+  the `indices` and `updates` can be folded into a `batch_shape`. This
+  `batch_shape` is all axes of the `indices`, except for the innermost
+  `index_depth` axis.
+
+  ```
+  index_depth = indices.shape[-1]
+  batch_shape = indices.shape[:-1]
+  ```
+
+  Note: The one exception is that the `batch_shape` cannot be `[]`. You can't
+  update a single index by passing indices with shape `[index_depth]`.
+
+  `updates` must have a matching `batch_shape` (the axes before `inner_shape`).
+
+  ```
+  assert updates.shape == batch_shape + inner_shape
+  ```
+
+  Note: The result is equivalent to flattening the `batch_shape` axes of
+  `indices` and `updates`. This generalization just avoids the need
+  for reshapes when it is more natural to construct "folded" indices and
+  updates.
+
+  With this generalization the full shape constraints are:
+
+  ```
+  assert tf.rank(indices) >= 2
+  index_depth = indices.shape[-1]
+  batch_shape = indices.shape[:-1]
+  assert index_depth <= tf.rank(tensor)
+  outer_shape = tensor.shape[:index_depth]
+  inner_shape = tensor.shape[index_depth:]
+  assert updates.shape == batch_shape + inner_shape
+  ```
+
+  For example, to draw an `X` on a `(5,5)` matrix start with these indices:
+
+  >>> tensor = tf.zeros([5,5])
+  >>> indices = tf.constant([
+  ...  [[0,0],
+  ...   [1,1],
+  ...   [2,2],
+  ...   [3,3],
+  ...   [4,4]],
+  ...  [[0,4],
+  ...   [1,3],
+  ...   [2,2],
+  ...   [3,1],
+  ...   [4,0]],
+  ... ])
+  >>> indices.shape.as_list()  # batch_shape == [2, 5], index_depth == 2
+  [2, 5, 2]
+
+  Here the `indices` do not have a shape of `[num_updates, index_depth]`, but a
+  shape of `batch_shape+[index_depth]`.
+
+  Since the `index_depth` is equal to the rank of `tensor`:
+
+  * `outer_shape` is `(5,5)`
+  * `inner_shape` is `()` - each update is scalar
+  * `updates.shape` is `batch_shape + inner_shape == (5,2) + ()`
+
+  >>> updates = [
+  ...   [1,1,1,1,1],
+  ...   [1,1,1,1,1],
+  ... ]
+
+  Putting this together gives:
+
+  >>> tf.tensor_scatter_nd_update(tensor, indices, updates).numpy()
+  array([[1., 0., 0., 0., 1.],
+         [0., 1., 0., 1., 0.],
+         [0., 0., 1., 0., 0.],
+         [0., 1., 0., 1., 0.],
+         [1., 0., 0., 0., 1.]], dtype=float32)
+
+  Args:
+    tensor: Tensor to copy/update.
+    indices: Indices to update.
+    updates: Updates to apply at the indices.
+    name: Optional name for the operation.
+
+  Returns:
+    A new tensor with the given shape and updates applied according to the
+    indices.
+  """
+  return gen_array_ops.tensor_scatter_update(
+      tensor=tensor, indices=indices, updates=updates, name=name)
+
+
 # Define quantize_v2 here in order to make name the second-to-last attribute,
 # because round_mode was added later.
 # (And also now because of 'axis' processing).
@@ -5223,6 +5647,13 @@ dequantize.__doc__ = gen_array_ops.dequantize.__doc__
 
 @tf_export("quantization.quantize_and_dequantize")
 @dispatch.add_dispatch_support
+@deprecation.deprecated(None,
+                        "This Op has been deprecated, use" +
+                        "`quantize_and_dequantize_v2` instead. To " +
+                        "To simulate the V1 the behavior of " +
+                        "tf.quantization.quantize_and_dequantize(...) use " +
+                        "tf.grad_pass_through(" +
+                        "tf.quantization.quantize_and_dequantize_v2)(...).")
 def quantize_and_dequantize(
     input,  # pylint: disable=redefined-builtin
     input_min,
@@ -5269,6 +5700,93 @@ def quantize_and_dequantize(
     axis %= input.shape.ndims
 
   return gen_array_ops.quantize_and_dequantize_v2(
+      input,
+      input_min=input_min,
+      input_max=input_max,
+      signed_input=signed_input,
+      num_bits=num_bits,
+      range_given=range_given,
+      round_mode=round_mode,
+      narrow_range=narrow_range,
+      axis=axis,
+      name=name)
+
+
+@tf_export("quantization.quantize_and_dequantize_v2")
+@dispatch.add_dispatch_support
+def quantize_and_dequantize_v2(
+    input,  # pylint: disable=redefined-builtin
+    input_min,
+    input_max,
+    signed_input=True,
+    num_bits=8,
+    range_given=False,
+    round_mode="HALF_TO_EVEN",
+    name=None,
+    narrow_range=False,
+    axis=None):
+  """Quantizes then dequantizes a tensor.
+
+  Updates the gradient definition for quantization that is outside the range to
+  be 0.To simulate the V1 the behavior of
+  tf.quantization.quantize_and_dequantize(...) use
+  tf.grad_pass_through(tf.quantization.quantize_and_dequantize_v2)(...).
+
+  Example usage:
+
+  ```python
+  def getQuantizeOp(input):
+      input_tensor = tf.placeholder(tf.float32, shape=[4, 4])
+      net = tf.quantization.quantize_and_dequantize(input,
+                                                    input_min=min_threshold,
+                                                    input_max=max_threshold,
+                                                    range_given=True)
+
+  To simulate v1 behavior:
+
+  def testDecomposeQuantizeDequantize(self):
+      def f(input_tensor):
+        return tf.quantization.quantize_and_dequantize_v2(input_tensor,
+                                                          input_min = 5.0,
+                                                          input_max= -10.0,
+                                                          range_given=True)
+      input_tensor = tf.placeholder(tf.float32, shape=[4, 4])
+      net = tf.grad_pass_through(f)(input_tensor)
+  ```
+
+  Args:
+    input: A `Tensor` to quantize and dequantize.
+    input_min: If range_given=True, the minimum input value, that needs to be
+      represented in the quantized representation. If axis is specified, this
+      should be a vector of minimum values for each slice along axis.
+    input_max: If range_given=True, the maximum input value that needs to be
+      represented in the quantized representation. If axis is specified, this
+      should be a vector of maximum values for each slice along axis.
+    signed_input: True if the quantization is signed or unsigned.
+    num_bits: The bitwidth of the quantization.
+    range_given: If true use `input_min` and `input_max` for the range of the
+      input, otherwise determine min and max from the input `Tensor`.
+    round_mode: Rounding mode when rounding from float values to quantized ones.
+      one of ['HALF_TO_EVEN', 'HALF_UP']
+    name: Optional name for the operation.
+    narrow_range: If true, then the absolute value of the quantized minimum
+      value is the same as the quantized maximum value, instead of 1 greater.
+      i.e. for 8 bit quantization, the minimum value is -127 instead of -128.
+    axis: Integer. If specified, refers to a dimension of the input tensor, such
+      that quantization will be per slice along that dimension.
+
+  Returns:
+    A `Tensor`. Each element is the result of quantizing and dequantizing the
+    corresponding element of `input`.
+  """
+  if axis is None:
+    axis = -1
+  elif axis < 0:
+    if input.shape.ndims is None:
+      raise ValueError("input should have known rank to use negative axis.")
+    axis %= input.shape.ndims
+
+  return gen_array_ops.quantize_and_dequantize_v4(
       input,
       input_min=input_min,
       input_max=input_max,
@@ -5447,9 +5965,9 @@ def extract_image_patches_v2(images, sizes, strides, rates, padding, name=None):
   ```
 
   Args:
-    images: A 4-D Tensor with shape `[batch, in_rows, in_cols, depth]
-    sizes: The size of the extracted patches. Must be [1, size_rows, size_cols,
-      1].
+    images: A 4-D Tensor with shape `[batch, in_rows, in_cols, depth]`.
+    sizes: The size of the extracted patches. Must be
+      `[1, size_rows, size_cols, 1]`.
     strides: A 1-D Tensor of length 4. How far the centers of two consecutive
       patches are in the images. Must be: `[1, stride_rows, stride_cols, 1]`.
     rates: A 1-D Tensor of length 4. Must be: `[1, rate_rows, rate_cols, 1]`.
@@ -5768,7 +6286,7 @@ def _with_nonzero_rank(data):
 @dispatch.add_dispatch_support
 def repeat(input, repeats, axis=None, name=None):  # pylint: disable=redefined-builtin
   """Repeat elements of `input`.
-  
+
   See also `tf.concat`, `tf.stack`, `tf.tile`.
 
   Args:

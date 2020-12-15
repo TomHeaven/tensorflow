@@ -25,7 +25,7 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/mem.h"
-#include "tensorflow/core/profiler/internal/annotation_stack.h"
+#include "tensorflow/core/profiler/internal/cpu/annotation_stack.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -1344,32 +1344,6 @@ const char *GetTraceEventTypeName(const CuptiTracerEventType &type) {
   }
 }
 
-void AnnotationMap::Add(uint32 device_id, uint32 correlation_id,
-                        const std::string &annotation) {
-  if (annotation.empty()) return;
-  VLOG(3) << "Add annotation: device_id: " << device_id
-          << " correlation_id: " << correlation_id
-          << " annotation: " << annotation;
-  if (device_id >= per_device_map_.size()) return;
-  auto &per_device_map = per_device_map_[device_id];
-  absl::MutexLock lock(&per_device_map.mutex);
-  if (per_device_map.annotations.size() < max_size_) {
-    absl::string_view annotation_str =
-        *per_device_map.annotations.insert(annotation).first;
-    per_device_map.correlation_map.emplace(correlation_id, annotation_str);
-  }
-}
-
-absl::string_view AnnotationMap::LookUp(uint32 device_id,
-                                        uint32 correlation_id) {
-  if (device_id >= per_device_map_.size()) return absl::string_view();
-  auto &per_device_map = per_device_map_[device_id];
-  absl::MutexLock lock(&per_device_map.mutex);
-  auto it = per_device_map.correlation_map.find(correlation_id);
-  return it != per_device_map.correlation_map.end() ? it->second
-                                                    : absl::string_view();
-}
-
 /* static */ CuptiTracer *CuptiTracer::GetCuptiTracerSingleton() {
   static auto *singleton = new CuptiTracer(GetCuptiInterface());
   return singleton;
@@ -1518,6 +1492,7 @@ Status CuptiTracer::DisableActivityTracing() {
 
 Status CuptiTracer::Finalize() {
   if (option_->cupti_finalize) {
+    VLOG(1) << "CuptiFinalize";
     RETURN_IF_CUPTI_ERROR(cupti_interface_->Finalize());
   }
   return Status::OK();
@@ -1563,8 +1538,18 @@ Status CuptiTracer::HandleCallback(CUpti_CallbackDomain domain,
     // Set up the map from correlation id to annotation string.
     const auto &annotation = AnnotationStack::Get();
     if (!annotation.empty()) {
-      collector_->annotation_map()->Add(device_id, cbdata->correlationId,
-                                        annotation);
+      if (cbid ==
+          CUPTI_DRIVER_TRACE_CBID_cuLaunchCooperativeKernelMultiDevice) {
+        // Kernels are launched on different devices by this API call, therefore
+        // we need to populate per device annotation map respectively.
+        for (int i = 0; i < num_gpus_; ++i) {
+          collector_->annotation_map()->Add(i, cbdata->correlationId,
+                                            annotation);
+        }
+      } else {
+        collector_->annotation_map()->Add(device_id, cbdata->correlationId,
+                                          annotation);
+      }
     }
 
     TF_RETURN_IF_ERROR(cupti_driver_api_hook_->OnDriverApiExit(

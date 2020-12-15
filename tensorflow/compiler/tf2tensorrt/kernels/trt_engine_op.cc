@@ -48,8 +48,7 @@ limitations under the License.
 #include "tensorflow/core/util/env_var.h"
 #include "tensorflow/stream_executor/lib/statusor.h"
 
-#if GOOGLE_CUDA
-#if GOOGLE_TENSORRT
+#if GOOGLE_CUDA && GOOGLE_TENSORRT
 #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 #include "third_party/tensorrt/NvInfer.h"
 
@@ -644,8 +643,10 @@ void TRTEngineOp::ComputeAsync(OpKernelContext* ctx,
     }
     // Release any outputs that are allocated, ExecuteNativeSegment will
     // re-allocate them and fail if they are currently allocated.
+    // The Tensor pointer in the returned TensorValue must be explicitly
+    // deleted.
     for (int i = 0; i < ctx->num_outputs(); i++) {
-      ctx->release_output(i);
+      delete ctx->release_output(i).tensor;
     }
     ExecuteNativeSegment(ctx, helper);
     return;
@@ -799,6 +800,9 @@ StatusOr<std::pair<EngineContext*, int>> TRTEngineOp::GetEngine(
 
     TrtUniquePtrType<IRuntime> infer(nvinfer1::createInferRuntime(logger));
     infer->setGpuAllocator(allocator);
+    // Need to initialize plugins in order to deserialize engines that contain
+    // plugins.
+    MaybeInitializeTrtPlugins(&logger);
     TrtUniquePtrType<nvinfer1::ICudaEngine> static_engine(
         infer->deserializeCudaEngine(serialized_segment_.c_str(),
                                      serialized_segment_.size(), nullptr));
@@ -1009,5 +1013,4 @@ REGISTER_KERNEL_BUILDER(Name("TRTEngineOp").Device(DEVICE_GPU), TRTEngineOp);
 }  // namespace tensorrt
 }  // namespace tensorflow
 
-#endif  // GOOGLE_TENSORRT
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA && GOOGLE_TENSORRT

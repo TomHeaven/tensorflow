@@ -123,6 +123,8 @@ DataType ConvertIODataTypeToDataType(toco::IODataType dtype) {
       return DT_BOOL;
     case toco::IODataType::COMPLEX64:
       return DT_COMPLEX64;
+    case toco::IODataType::COMPLEX128:
+      return DT_COMPLEX128;
     default:
       return DT_INVALID;
   }
@@ -269,10 +271,11 @@ Status DumpOpGraphToFile(mlir::ModuleOp module, const std::string& filename) {
   return Status::OK();
 }
 
-Status ConvertMLIRToTFLiteFlatBuffer(const toco::TocoFlags& toco_flags,
-                                     mlir::OwningModuleRef module,
-                                     const mlir::TFL::PassConfig& pass_config,
-                                     string* result) {
+Status ConvertMLIRToTFLiteFlatBuffer(
+    const toco::TocoFlags& toco_flags, mlir::OwningModuleRef module,
+    const mlir::TFL::PassConfig& pass_config,
+    const std::unordered_set<std::string>& saved_model_tags, string* result,
+    llvm::Optional<tensorflow::Session*> session) {
   bool emit_builtin_tflite_ops = !toco_flags.force_select_tf_ops();
   bool emit_select_tf_ops = toco_flags.enable_select_tf_ops();
   bool emit_custom_ops = toco_flags.allow_custom_ops();
@@ -286,7 +289,7 @@ Status ConvertMLIRToTFLiteFlatBuffer(const toco::TocoFlags& toco_flags,
 
   mlir::PassManager pm(module->getContext());
 
-  tensorflow::AddTFToTFLConversionPasses(pass_config, &pm);
+  tensorflow::AddTFToTFLConversionPasses(pass_config, &pm, session);
   // Convert back to outlined while format for export back to flatbuffer.
   if (pass_config.legalize_tf_while) {
     pm.addPass(mlir::TFL::CreateWhileOutlinePass());
@@ -295,8 +298,8 @@ Status ConvertMLIRToTFLiteFlatBuffer(const toco::TocoFlags& toco_flags,
 
   auto status = ConvertTFExecutorToTFLOrFlatbuffer(
       module.get(), /*export_to_mlir=*/false, emit_builtin_tflite_ops,
-      emit_select_tf_ops, emit_custom_ops, pass_config.quant_specs, result,
-      &pm);
+      emit_select_tf_ops, emit_custom_ops, pass_config.quant_specs,
+      saved_model_tags, result, &pm);
   if (toco_flags.has_dump_graphviz_dir()) {
     TF_RETURN_IF_ERROR(DumpOpGraphToFile(
         // rename once we enable the new converter feature flag.

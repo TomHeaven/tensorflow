@@ -24,6 +24,7 @@ py_library(
         "liveness.py",
         "reaching_definitions.py",
         "reaching_fndefs.py",
+        "type_inference.py",
     ],
     srcs_version = "PY2AND3",
     visibility = ["//visibility:public"],
@@ -88,38 +89,8 @@ py_test(
     testonly = True,
     srcs = ["liveness_test.py"],
     python_version = "PY3",
-    srcs_version = "PY2AND3",
-    deps = [
-        ":static_analysis",
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python/autograph/pyct",
-    ],
-)
-
-py_library(
-    name = "liveness_test_lib",
-    srcs = ["liveness_test.py"],
-    srcs_version = "PY2AND3",
-    deps = [
-        ":static_analysis",
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python/autograph/pyct",
-        "@gast_archive//:gast",
-    ],
-)
-
-py_test(
-    name = "liveness_py3_test",
-    srcs = ["liveness_py3_test.py"],
-    python_version = "PY3",
     srcs_version = "PY3",
-    tags = [
-        "no_oss_py2",
-        "no_pip",
-        "nopip",
-    ],
     deps = [
-        ":liveness_test_lib",
         ":static_analysis",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python/autograph/pyct",
@@ -130,7 +101,7 @@ py_test(
     name = "reaching_definitions_test",
     srcs = ["reaching_definitions_test.py"],
     python_version = "PY3",
-    srcs_version = "PY2AND3",
+    srcs_version = "PY3",
     deps = [
         ":static_analysis",
         "//tensorflow/python:client_testlib",
@@ -138,32 +109,15 @@ py_test(
     ],
 )
 
-py_library(
-    name = "reaching_definitions_test_lib",
-    srcs = ["reaching_definitions_test.py"],
-    srcs_version = "PY2AND3",
+py_test(
+    name = "type_inference_test",
+    srcs = ["type_inference_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
     deps = [
         ":static_analysis",
         "//tensorflow/python:client_testlib",
         "//tensorflow/python/autograph/pyct",
         "@gast_archive//:gast",
-    ],
-)
-
-py_test(
-    name = "reaching_definitions_py3_test",
-    srcs = ["reaching_definitions_py3_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
-    tags = [
-        "no_oss_py2",
-        "no_pip",
-        "nopip",
-    ],
-    deps = [
-        ":reaching_definitions_test_lib",
-        ":static_analysis",
-        "//tensorflow/python:client_testlib",
-        "//tensorflow/python/autograph/pyct",
     ],
 )

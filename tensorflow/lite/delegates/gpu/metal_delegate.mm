@@ -26,6 +26,7 @@ limitations under the License.
 #include <thread>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/types/span.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/common.h"
@@ -37,7 +38,6 @@ limitations under the License.
 #include "tensorflow/lite/delegates/gpu/common/quantization_util.h"
 #include "tensorflow/lite/delegates/gpu/common/shape.h"
 #include "tensorflow/lite/delegates/gpu/common/status.h"
-#include "tensorflow/lite/delegates/gpu/common/transformations/general_transformations.h"
 #include "tensorflow/lite/delegates/gpu/common/types.h"
 #include "tensorflow/lite/delegates/gpu/metal/api.h"
 #include "tensorflow/lite/delegates/gpu/metal/buffer_convert.h"
@@ -177,10 +177,7 @@ class Delegate {
     if (options) {
       options_ = *options;
     } else {
-      // Default options.
-      options_.allow_precision_loss = false;
-      options_.enable_quantization = false;
-      options_.wait_type = TFLGpuDelegateWaitType::TFLGpuDelegateWaitTypePassive;
+      options_ = TFLGpuDelegateOptionsDefault();
     }
     metal_device_ = MTLCreateSystemDefaultDevice();
     command_queue_ = [metal_device_ newCommandQueue];
@@ -205,6 +202,14 @@ class Delegate {
   }
 
   absl::Status BindBufferToTensor(id<MTLBuffer> buffer, int tensor_index) {
+    // The tensor index is expected to be an input or output tensor of the interpreter.
+    // For quantized model, the buffer should be linked with their dequantized counterpart.
+    if (quant_conversion_map_.find(tensor_index) != quant_conversion_map_.end()) {
+      tensor_index = quant_conversion_map_[tensor_index];
+      // remove [dequantized tensor ID] -> [quantized tensor ID] mapping, to prevent extra
+      // dequant/quant on in/outputs.
+      quant_conversion_map_.erase(tensor_index);
+    }
     for (auto& input : graph_inputs_) {
       if (input.tensor_id == tensor_index) {
         input_output_buffers_[input.id] = buffer;
@@ -605,7 +610,7 @@ class Delegate {
   // Whenever quantized inference is enabled, this maps the tensor index of each
   // originally quantized (8-bit) tensor to its float version added in
   // model_builder - and vice versa.
-  std::unordered_map<int, int> quant_conversion_map_;
+  absl::flat_hash_map<int, int> quant_conversion_map_;
 
   TFLInferenceContext* inference_context_;
   // input and output buffers are passed into Metal inference engine
@@ -623,7 +628,7 @@ class Delegate {
   std::vector<BufferDescriptor> graph_inputs_;
   std::vector<BufferDescriptor> graph_outputs_;
 
-  id<MTLComputeCommandEncoder> external_command_encoder_;
+  id<MTLComputeCommandEncoder> external_command_encoder_ = nil;
   std::function<id<MTLComputeCommandEncoder>(bool is_last)> control_encoder_;
   id<MTLCommandQueue> command_queue_;
   std::unique_ptr<GpuAlarmClock> gpu_alarm_clock_;
@@ -723,4 +728,13 @@ bool TFLGpuDelegateSetCommandEncoder(
   if (!metal_delegate) return false;
   metal_delegate->SetCommandEncoder(encoder, control_encoder);
   return true;
+}
+
+TFLGpuDelegateOptions TFLGpuDelegateOptionsDefault() {
+  TFLGpuDelegateOptions options = {
+      .allow_precision_loss = false,
+      .wait_type = TFLGpuDelegateWaitType::TFLGpuDelegateWaitTypePassive,
+      .enable_quantization = true,
+  };
+  return options;
 }

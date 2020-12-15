@@ -38,7 +38,7 @@ auto* mlir_bridge_gauge_v2 = monitoring::Gauge<bool, 0>::New(
 // encapsulated graph to a particular device.
 Status MlirBridgePass::Run(const ConfigProto& config_proto,
                            mlir::ModuleOp module) {
-  if (!config_proto.experimental().enable_mlir_bridge()) {
+  if (!IsEnabled(config_proto)) {
     VLOG(0) << "Skipping MLIR TPU Bridge, session flag not enabled";
     mlir_bridge_gauge_v2->GetCell()->Set(false);
     return Status::OK();
@@ -56,7 +56,7 @@ Status MlirBridgeV1CompatPass::Run(const GraphOptimizationPassOptions& options,
   // Skip function graphs as MlirBridgePass will be used instead.
   if (options.is_function_graph) return Status::OK();
 
-  if (!options.session_options->config.experimental().enable_mlir_bridge()) {
+  if (!IsEnabled(options.session_options->config)) {
     VLOG(0) << "Skipping MLIR TPU Bridge V1 Compat, session flag not enabled";
     mlir_bridge_gauge_v1->GetCell()->Set(false);
     return Status::OK();

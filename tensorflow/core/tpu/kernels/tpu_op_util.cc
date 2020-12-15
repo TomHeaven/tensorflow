@@ -22,24 +22,6 @@ limitations under the License.
 namespace tensorflow {
 namespace tpu {
 namespace {
-// Return fingerprint_in_metadata if it's not empty; otherwise read input tensor
-// data to compute the fingerprint.
-std::string GuaranteedConstFingerprint(
-    const string& fingerprint_in_metadata,
-    const OpInputList& guaranteed_constants) {
-  if (fingerprint_in_metadata.empty()) {
-    uint64_t fingerprint = 0;
-    for (const auto& constant : guaranteed_constants) {
-      fingerprint = TpuCompile_CreateGuaranteedConstFingerprint(
-          fingerprint, constant.tensor_data().data(),
-          constant.tensor_data().size());
-    }
-    return std::to_string(fingerprint);
-  } else {
-    return fingerprint_in_metadata;
-  }
-}
-
 std::string CreateShapePrefix(
     const std::vector<tensorflow::TensorShape>& dynamic_shapes) {
   std::string shapes_prefix;
@@ -86,6 +68,27 @@ std::string CreateConfigPrefix(const TPUCompileMetadataProto& metadata) {
 }
 }  // namespace
 
+// Return fingerprint_in_metadata if it's not empty; otherwise read input tensor
+// data to compute the fingerprint.
+std::string GuaranteedConstFingerprint(
+    const string& fingerprint_in_metadata,
+    const OpInputList& guaranteed_constants) {
+  if (fingerprint_in_metadata.empty()) {
+    uint64_t fingerprint = 0;
+    for (const Tensor& constant : guaranteed_constants) {
+      fingerprint =
+          tpu::UtilApiFn()->TpuCompile_CreateGuaranteedConstFingerprintFn(
+              fingerprint, constant.tensor_data().data(),
+              constant.tensor_data().size());
+    }
+    return std::to_string(fingerprint);
+  } else {
+    return fingerprint_in_metadata;
+  }
+}
+
+// The `guaranteed_constants` must be passed as reference due to the lazy
+// evaluation of `guaranteed_const_fingerprint()` callback.
 TpuCompilationCacheKey CreateCompilationCacheKey(
     absl::string_view function_name, uint64 function_library_fingerprint,
     absl::string_view mlir_module, const OpInputList& guaranteed_constants,
@@ -107,21 +110,23 @@ TpuCompilationCacheKey CreateCompilationCacheKey(
     }
   }
   CompilationCacheKeyResult result =
-      TpuCompile_CreateCompilationCacheKey(CompilationCacheKeyProperty{
-          config_prefix.data(),
-          shapes_prefix.data(),
-          function_name.data(),
-          mlir_module.data(),
-          flattened_device_ids.data(),
-          flattened_device_ids.size(),
-          guaranteed_constants.size(),
-          function_library_fingerprint,
-          metadata.num_cores_per_replica(),
-          metadata.num_replicas(),
-          mesh_state.data(),
-      });
-  auto buffer_cleanup = gtl::MakeCleanup(
-      [result]() { TpuCompile_DestroyCompilationCacheKey(result); });
+      tpu::UtilApiFn()->TpuCompile_CreateCompilationCacheKeyFn(
+          CompilationCacheKeyProperty{
+              config_prefix.data(),
+              shapes_prefix.data(),
+              function_name.data(),
+              mlir_module.data(),
+              flattened_device_ids.data(),
+              flattened_device_ids.size(),
+              guaranteed_constants.size(),
+              function_library_fingerprint,
+              metadata.num_cores_per_replica(),
+              metadata.num_replicas(),
+              mesh_state.data(),
+          });
+  auto buffer_cleanup = gtl::MakeCleanup([result]() {
+    tpu::UtilApiFn()->TpuCompile_DestroyCompilationCacheKeyFn(result);
+  });
   TpuCompilationCacheKey key;
   key.prefix = result.key;
   key.debug_string = result.debug_string;

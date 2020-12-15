@@ -1,3 +1,5 @@
+load("//tensorflow:tensorflow.bzl", "filegroup")
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load(
     "//tensorflow:tensorflow.bzl",
     "tf_cc_test",
@@ -82,6 +84,7 @@ tf_cuda_library(
         "//tensorflow/c/eager:immediate_execution_operation",
         "//tensorflow/core/distributed_runtime:rendezvous_mgr_interface",
         "//tensorflow/core/distributed_runtime:worker_env",
+        "//tensorflow/core/nccl:collective_communicator",
     ] + select({
         "//tensorflow:android": [
             "//tensorflow/core:portable_tensorflow_lib_lite",
@@ -114,9 +117,27 @@ tf_cc_test(
         ":core",
         ":eager_operation",
         ":execute",
+        "//tensorflow/core:framework",
         "//tensorflow/core:lib",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
+        "//tensorflow/core/framework:tensor_testutil",
+        "//tensorflow/core/kernels:cast_op",
+    ],
+)
+
+tf_cc_test(
+    name = "placement_test",
+    srcs = ["placement_test.cc"],
+    deps = [
+        ":context",
+        ":core",
+        ":eager_operation",
+        "//tensorflow/core:framework",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test",
+        "//tensorflow/core:test_main",
+        "//tensorflow/core:testlib",
     ],
 )
 
@@ -148,6 +169,7 @@ tf_cuda_library(
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core:lib",
         "//tensorflow/core/platform:platform_port",
+        "//tensorflow/core/util:abstract_stack_trace",
     ] + select({
         "//tensorflow:android": [
             "//tensorflow/core:portable_tensorflow_lib_lite",
@@ -293,9 +315,7 @@ KERNEL_AND_DEVICE_DEPS = [
     "//tensorflow/core:lib_internal",
     "//tensorflow/core:protos_all_cc",
     "//tensorflow/core/profiler/lib:annotated_traceme",
-    "//tensorflow/core/profiler/lib:connected_traceme",
     "//tensorflow/core/profiler/lib:traceme",
-    "//tensorflow/core/profiler/lib:traceme_encode",
     "//tensorflow/core/grappler/optimizers:meta_optimizer",
 ]
 
@@ -321,7 +341,7 @@ tf_cuda_library(
         ],
         "//tensorflow:windows": KERNEL_AND_DEVICE_DEPS,
         "//conditions:default": KERNEL_AND_DEVICE_DEPS + [
-            "//tensorflow/compiler/jit:xla_kernel_creator_util",
+            "//tensorflow/compiler/jit:xla_kernel_creator",
         ],
     }),
 )
@@ -427,10 +447,11 @@ cc_library(
     copts = tf_copts(allow_exceptions = True),
     deps = [
         ":eager_op_rewrite_registry",
+        "//tensorflow/core:all_kernels",
         "//tensorflow/core:framework",
         "//tensorflow/core:graph",
         "//tensorflow/core:lib",
-        "//tensorflow/core:mkl_graph_util",
+        "//tensorflow/core/graph:mkl_graph_util",
     ],
     alwayslink = 1,
 )

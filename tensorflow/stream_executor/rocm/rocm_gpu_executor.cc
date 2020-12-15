@@ -720,47 +720,6 @@ port::Status GpuExecutor::EnablePeerAccessTo(StreamExecutorInterface* other) {
   return GpuDriver::EnablePeerAccess(context_, rocm_other->context_);
 }
 
-SharedMemoryConfig GpuExecutor::GetDeviceSharedMemoryConfig() {
-  port::StatusOr<hipSharedMemConfig> rocm_config =
-      GpuDriver::ContextGetSharedMemConfig(context_);
-  if (!rocm_config.ok()) {
-    // Don't log; the failed call will log necessary output.
-    return SharedMemoryConfig::kDefault;
-  }
-
-  switch (rocm_config.ValueOrDie()) {
-    case hipSharedMemBankSizeDefault:
-      return SharedMemoryConfig::kDefault;
-    case hipSharedMemBankSizeFourByte:
-      return SharedMemoryConfig::kFourByte;
-    case hipSharedMemBankSizeEightByte:
-      return SharedMemoryConfig::kEightByte;
-    default:
-      LOG(FATAL) << "Invalid shared memory configuration returned: "
-                 << rocm_config.ValueOrDie();
-  }
-}
-
-port::Status GpuExecutor::SetDeviceSharedMemoryConfig(
-    SharedMemoryConfig config) {
-  hipSharedMemConfig rocm_config;
-  switch (config) {
-    case SharedMemoryConfig::kDefault:
-      rocm_config = hipSharedMemBankSizeDefault;
-      break;
-    case SharedMemoryConfig::kFourByte:
-      rocm_config = hipSharedMemBankSizeFourByte;
-      break;
-    case SharedMemoryConfig::kEightByte:
-      rocm_config = hipSharedMemBankSizeEightByte;
-      break;
-    default:
-      LOG(FATAL) << "Invalid shared memory configuration specified: "
-                 << static_cast<int>(config);
-  }
-  return GpuDriver::ContextSetSharedMemConfig(context_, rocm_config);
-}
-
 bool GpuExecutor::DeviceMemoryUsage(int64* free, int64* total) const {
   return GpuDriver::GetDeviceMemoryInfo(context_, free, total);
 }
@@ -768,24 +727,24 @@ bool GpuExecutor::DeviceMemoryUsage(int64* free, int64* total) const {
 bool GpuExecutor::GetSymbol(const string& symbol_name,
                             ModuleHandle module_handle, void** mem,
                             size_t* bytes) {
-    absl::MutexLock lock{&in_memory_modules_mu_};
-    if (static_cast<bool>(module_handle)) {
-      auto it = gpu_binary_to_module_.find(module_handle.id());
-      CHECK(it != gpu_binary_to_module_.end());
-      if (GpuDriver::GetModuleSymbol(
-              context_, it->second.first, symbol_name.c_str(),
-              reinterpret_cast<hipDeviceptr_t*>(mem), bytes)) {
-        return true;
-      }
+  absl::MutexLock lock{&in_memory_modules_mu_};
+  if (static_cast<bool>(module_handle)) {
+    auto it = gpu_binary_to_module_.find(module_handle.id());
+    CHECK(it != gpu_binary_to_module_.end());
+    if (GpuDriver::GetModuleSymbol(
+            context_, it->second.first, symbol_name.c_str(),
+            reinterpret_cast<hipDeviceptr_t*>(mem), bytes)) {
+      return true;
     }
+  }
 
-    for (auto& it : gpu_binary_to_module_) {
-      if (GpuDriver::GetModuleSymbol(
-              context_, it.second.first, symbol_name.c_str(),
-              reinterpret_cast<hipDeviceptr_t*>(mem), bytes)) {
-        return true;
-      }
+  for (auto& it : gpu_binary_to_module_) {
+    if (GpuDriver::GetModuleSymbol(
+            context_, it.second.first, symbol_name.c_str(),
+            reinterpret_cast<hipDeviceptr_t*>(mem), bytes)) {
+      return true;
     }
+  }
 
   LOG(INFO) << "Falied to find symbol in any modules: " << symbol_name;
   return false;
@@ -897,6 +856,11 @@ GpuExecutor::CreateDeviceDescription(int device_ordinal) {
 
     float clock_rate_ghz = static_cast<float>(prop.clockRate) / 1e6;
     builder.set_clock_rate_ghz(clock_rate_ghz);
+
+    // mem_bandwidth = 2 * mem_bus_width_in_bytes * mem_clock_rate_in_hz
+    int64 memory_bandwidth = 2 * (int64(prop.memoryBusWidth) / 8) *
+                             (int64(prop.memoryClockRate) * 1000);
+    builder.set_memory_bandwidth(memory_bandwidth);
   }
 
   {

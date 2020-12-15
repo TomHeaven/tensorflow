@@ -21,14 +21,15 @@ from __future__ import print_function
 from tensorflow.python.distribute import distribution_strategy_context as ds
 from tensorflow.python.distribute import reduce_util
 from tensorflow.python.framework import dtypes
-from tensorflow.python.framework import ops
+from tensorflow.python.keras import backend
 from tensorflow.python.keras.layers import normalization
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.util.tf_export import keras_export
 
 
-@keras_export('keras.layers.experimental.SyncBatchNormalization', v1=[])  # pylint: disable=g-classes-have-attributes
+# pylint: disable=g-classes-have-attributes
+@keras_export('keras.layers.experimental.SyncBatchNormalization', v1=[])
 class SyncBatchNormalization(normalization.BatchNormalizationBase):
   r"""Normalize and scale inputs or activations synchronously across replicas.
 
@@ -158,7 +159,7 @@ class SyncBatchNormalization(normalization.BatchNormalizationBase):
 
   def _calculate_mean_and_var(self, x, axes, keep_dims):
 
-    with ops.name_scope('moments', values=[x, axes]):
+    with backend.name_scope('moments'):
       # The dynamic range of fp16 is too limited to support the collection of
       # sufficient statistics. As a workaround we simply perform the operations
       # on 32-bit floats before converting the mean and variance back to fp16
@@ -169,9 +170,14 @@ class SyncBatchNormalization(normalization.BatchNormalizationBase):
         local_squared_sum = math_ops.reduce_sum(math_ops.square(y), axis=axes,
                                                 keepdims=True)
         batch_size = math_ops.cast(array_ops.shape_v2(y)[0], dtypes.float32)
-        y_sum, y_squared_sum, global_batch_size = (
-            replica_ctx.all_reduce(reduce_util.ReduceOp.SUM, [
-                local_sum, local_squared_sum, batch_size]))
+        # TODO(b/163099951): batch the all-reduces once we sort out the ordering
+        # issue for NCCL. We don't have a mechanism to launch NCCL in the same
+        # order in each replica nowadays, so we limit NCCL to batch all-reduces.
+        y_sum = replica_ctx.all_reduce(reduce_util.ReduceOp.SUM, local_sum)
+        y_squared_sum = replica_ctx.all_reduce(reduce_util.ReduceOp.SUM,
+                                               local_squared_sum)
+        global_batch_size = replica_ctx.all_reduce(reduce_util.ReduceOp.SUM,
+                                                   batch_size)
 
         axes_vals = [(array_ops.shape_v2(y))[i] for i in range(1, len(axes))]
         multiplier = math_ops.cast(math_ops.reduce_prod(axes_vals),
@@ -204,13 +210,13 @@ class SyncBatchNormalization(normalization.BatchNormalizationBase):
         return (mean, variance)
 
 
-@keras_export('keras.layers.BatchNormalization', v1=[])  # pylint: disable=missing-docstring
+# pylint: disable=missing-docstring
+@keras_export('keras.layers.BatchNormalization', v1=[])
 class BatchNormalization(normalization.BatchNormalizationBase):
 
   __doc__ = normalization.replace_in_base_docstring([
-      ('{{TRAINABLE_ATTRIBUTE_NOTE}}',
-       '''
-  **About setting `layer.trainable = False` on a `BatchNormalization layer:**
+      ('{{TRAINABLE_ATTRIBUTE_NOTE}}', '''
+  **About setting `layer.trainable = False` on a `BatchNormalization` layer:**
 
   The meaning of setting `layer.trainable = False` is to freeze the layer,
   i.e. its internal state will not change during training:
@@ -242,6 +248,7 @@ class BatchNormalization(normalization.BatchNormalizationBase):
       attribute is changed after calling `compile()` on a model,
       the new value doesn't take effect for this model
       until `compile()` is called again.
-      ''')])
+      ''')
+  ])
 
   _USE_V2_BEHAVIOR = True

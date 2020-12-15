@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/mlir/lite/tf_tfl_passes.h"
 
+#include "llvm/ADT/Optional.h"
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/Function.h"  // from @llvm-project
 #include "mlir/IR/Module.h"  // from @llvm-project
@@ -24,8 +25,10 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_config.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_passes.h"
 #include "tensorflow/compiler/mlir/lite/transforms/passes.h"
+#include "tensorflow/compiler/mlir/tensorflow/ir/tf_saved_model.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/decode_constant.h"
 #include "tensorflow/compiler/mlir/tensorflow/transforms/passes.h"
+#include "tensorflow/compiler/mlir/tensorflow/transforms/tf_saved_model_passes.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/tf_mlir_translate.h"
 
 namespace mlir {
@@ -35,6 +38,10 @@ CreateTFExecutorToControlDialectConversion();
 }  // namespace mlir
 
 namespace tensorflow {
+namespace {
+// Data layout supported by TFLite.
+const char kTFLiteDataLayout[] = "NHWC";
+}  // namespace
 
 void AddQuantizationPasses(const mlir::TFL::QuantizationSpecs& quant_specs,
                            mlir::OpPassManager* pass_manager) {
@@ -54,16 +61,36 @@ void AddQuantizationPasses(const mlir::TFL::QuantizationSpecs& quant_specs,
 }
 
 void AddTFToTFLConversionPasses(const mlir::TFL::PassConfig& pass_config,
-                                mlir::OpPassManager* pass_manager) {
+                                mlir::OpPassManager* pass_manager,
+                                llvm::Optional<tensorflow::Session*> session) {
   mlir::TF::StandardPipelineOptions standard_pipeline_options;
   standard_pipeline_options.enable_inliner = false;
   standard_pipeline_options.form_clusters = pass_config.form_clusters;
   mlir::TF::CreateTFStandardPipeline(*pass_manager, standard_pipeline_options);
   pass_manager->addPass(mlir::TF::CreateDeviceIndexSelectorPass());
 
+  // Add canonicalize pass to remove no-op session initializer pass.
+  pass_manager->addPass(mlir::createCanonicalizerPass());
+
   if (pass_config.shape_inference) {
     pass_manager->addPass(mlir::TF::CreateTFShapeInferencePass());
   }
+
+  if (session.hasValue()) {
+    // Add a pass that converts reference variables to resource variables.
+    pass_manager->addPass(
+        mlir::TF::
+            CreateConvertReadonlyReferenceVariablesToResourceVariablesPass());
+
+    // Add a pass that promotes resource variable to the function arguments.
+    pass_manager->addPass(mlir::TF::CreatePromoteVarHandlesToArgsPass());
+
+    // Add a pass that creates global tensors and converts the function
+    // arguments to the tf_saved_model.bound_input arguments.
+    pass_manager->addPass(
+        mlir::tf_saved_model::CreateLiftVariablesPass(session.getValue()));
+  }
+
   // Keep this pass after the shape inference pass, which couldn't do shape
   // inference for non-tf ops.
   if (!pass_config.quant_specs.serialized_quant_stats.empty()) {
@@ -143,6 +170,16 @@ void AddTFToTFLConversionPasses(const mlir::TFL::PassConfig& pass_config,
   // The below passes only make sense if Builtin TFLite ops are enabled
   // for emission.
   if (pass_config.emit_builtin_tflite_ops) {
+    // Run shape inference after variables are converted to constants.
+    if (pass_config.shape_inference) {
+      pass_manager->addPass(mlir::TF::CreateTFShapeInferencePass());
+    }
+    // Force layout supported by TFLite, this will transpose the data
+    // to match 'kTFLiteDataLayout'
+    mlir::TF::LayoutOptimizationPipelineOptions layout_optimization_options;
+    layout_optimization_options.force_data_format = kTFLiteDataLayout;
+    mlir::TF::CreateLayoutOptimizationPipeline(*pass_manager,
+                                               layout_optimization_options);
     // Prepare for TFLite dialect, rerun canonicalization, and then legalize to
     // the TFLite dialect.
     pass_manager->addPass(
@@ -150,8 +187,19 @@ void AddTFToTFLConversionPasses(const mlir::TFL::PassConfig& pass_config,
     pass_manager->addNestedPass<mlir::FuncOp>(mlir::createCanonicalizerPass());
     if (pass_config.shape_inference) {
       // Add a shape inference pass to optimize away the unnecessary casts.
+      // This also fixes the unranked shapes due to TF ops constant folding.
+      // TODO(fengliuai): remove this pass if TableGen patterns have a better
+      // to control the shapes for the intermediate results.
       pass_manager->addPass(mlir::TF::CreateTFShapeInferencePass());
     }
+
+    // Inline function calls that left in the graph after folding functional
+    // control flow ops (IfOp, CaseOp).
+    pass_manager->addPass(mlir::createInlinerPass());
+
+    // This pass removes the asset file dependencies in hash table use cases.
+    pass_manager->addPass(mlir::TF::CreateInitTextFileToImportPass());
+
     pass_manager->addPass(
         mlir::TFL::CreateLegalizeTFPass(pass_config.runtime_verification));
     pass_manager->addPass(mlir::TFL::CreateOptimizePass());
@@ -159,6 +207,7 @@ void AddTFToTFLConversionPasses(const mlir::TFL::PassConfig& pass_config,
     // so that it can target constants introduced once TensorFlow Identity ops
     // are removed during legalization.
     pass_manager->addPass(mlir::TFL::CreateOptimizeFunctionalOpsPass());
+    pass_manager->addPass(mlir::TFL::CreateRaiseCustomOpsPass());
     pass_manager->addPass(mlir::createSymbolDCEPass());
     pass_manager->addNestedPass<mlir::FuncOp>(mlir::createCanonicalizerPass());
     pass_manager->addNestedPass<mlir::FuncOp>(mlir::createCSEPass());
@@ -236,6 +285,8 @@ void CreateTFLStandardPipeline(OpPassManager& pm,
 
   // Canonicalize, CSE etc.
   pm.addNestedPass<mlir::FuncOp>(mlir::createCanonicalizerPass());
+  pm.addNestedPass<mlir::tf_saved_model::SessionInitializerOp>(
+      mlir::createCanonicalizerPass());
   pm.addNestedPass<mlir::FuncOp>(mlir::createCSEPass());
 
   // Pass for stateful operands like LSTM.

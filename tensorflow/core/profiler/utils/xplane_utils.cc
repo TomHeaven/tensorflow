@@ -24,6 +24,7 @@ limitations under the License.
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/platform/env_time.h"
 #include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
 #include "tensorflow/core/profiler/utils/timespan.h"
@@ -34,26 +35,64 @@ namespace tensorflow {
 namespace profiler {
 namespace {
 
+// Returns the index of the first element in array for which pred is true.
+// Returns -1 if no such element is found.
+template <typename T, typename Pred>
+int FindIf(const protobuf::RepeatedPtrField<T>& array, Pred&& pred) {
+  for (int i = 0; i < array.size(); ++i) {
+    if (pred(&array.Get(i))) return i;
+  }
+  return -1;
+}
+
+// Removes the given element from array.
+template <typename T>
+void Remove(protobuf::RepeatedPtrField<T>* array, const T* elem) {
+  int i = FindIf(*array, [elem](const T* e) { return elem == e; });
+  if (i == -1) return;
+  for (; i < array->size() - 1; ++i) {
+    array->SwapElements(i + 1, i);
+  }
+  array->RemoveLast();
+}
+
+template <typename T, typename Pred>
+void RemoveIf(protobuf::RepeatedPtrField<T>* array, Pred&& pred) {
+  int i = FindIf(*array, pred);
+  if (i == -1) return;
+  for (int j = i + 1; j < array->size(); ++j) {
+    if (!pred(&array->Get(j))) array->SwapElements(j, i++);
+  }
+  array->DeleteSubrange(i, array->size() - i);
+}
+
 // Creates a Timespan from an XEvent.
 // WARNING: This should only be used when comparing events from the same XLine.
 Timespan XEventTimespan(const XEvent& event) {
   return Timespan(event.offset_ps(), event.duration_ps());
 }
 
-// Functor that compares XEvents of the same XLine for sorting by timespan.
-struct XEventsComparator {
-  bool operator()(const XEvent* a, const XEvent* b) const {
-    return XEventTimespan(*a) < XEventTimespan(*b);
-  }
-};
-
 }  // namespace
 
 const XPlane* FindPlaneWithName(const XSpace& space, absl::string_view name) {
-  for (const XPlane& plane : space.planes()) {
-    if (plane.name() == name) return &plane;
+  int i = FindIf(space.planes(),
+                 [name](const XPlane* plane) { return plane->name() == name; });
+  return (i != -1) ? &space.planes(i) : nullptr;
+}
+
+XPlane* FindMutablePlaneWithName(XSpace* space, absl::string_view name) {
+  int i = FindIf(space->planes(),
+                 [name](const XPlane* plane) { return plane->name() == name; });
+  return (i != -1) ? space->mutable_planes(i) : nullptr;
+}
+
+XPlane* FindOrAddMutablePlaneWithName(XSpace* space, absl::string_view name) {
+  XPlane* plane = FindMutablePlaneWithName(space, name);
+  if (plane == nullptr) {
+    plane = space->add_planes();
+    plane->set_name(name.data(), name.size());
   }
-  return nullptr;
+  return plane;
 }
 
 std::vector<const XPlane*> FindPlanesWithPrefix(const XSpace& space,
@@ -65,20 +104,13 @@ std::vector<const XPlane*> FindPlanesWithPrefix(const XSpace& space,
   return result;
 }
 
-XPlane* FindMutablePlaneWithName(XSpace* space, absl::string_view name) {
+std::vector<XPlane*> FindMutablePlanesWithPrefix(XSpace* space,
+                                                 absl::string_view prefix) {
+  std::vector<XPlane*> result;
   for (XPlane& plane : *space->mutable_planes()) {
-    if (plane.name() == name) return &plane;
+    if (absl::StartsWith(plane.name(), prefix)) result.push_back(&plane);
   }
-  return nullptr;
-}
-
-XPlane* FindOrAddMutablePlaneWithName(XSpace* space, absl::string_view name) {
-  XPlane* plane = FindMutablePlaneWithName(space, name);
-  if (plane == nullptr) {
-    plane = space->add_planes();
-    plane->set_name(name.data(), name.size());
-  }
-  return plane;
+  return result;
 }
 
 bool IsNested(const XEvent& event, const XEvent& parent) {
@@ -110,29 +142,23 @@ void AddOrUpdateStrStat(int64 metadata_id, absl::string_view value,
   stat->set_str_value(std::string(value));
 }
 
-void RemovePlaneWithName(XSpace* space, absl::string_view name) {
-  auto* planes = space->mutable_planes();
-  planes->erase(
-      std::remove_if(planes->begin(), planes->end(),
-                     [&](const XPlane& plane) { return plane.name() == name; }),
-      planes->end());
+void RemovePlane(XSpace* space, const XPlane* plane) {
+  DCHECK(plane != nullptr);
+  Remove(space->mutable_planes(), plane);
 }
 
 void RemoveEmptyPlanes(XSpace* space) {
-  auto* planes = space->mutable_planes();
-  planes->erase(std::remove_if(planes->begin(), planes->end(),
-                               [&](const XPlane& plane) {
-                                 return plane.lines_size() == 0;
-                               }),
-                planes->end());
+  RemoveIf(space->mutable_planes(),
+           [&](const XPlane* plane) { return plane->lines().empty(); });
 }
 
 void RemoveEmptyLines(XPlane* plane) {
-  auto* lines = plane->mutable_lines();
-  lines->erase(std::remove_if(
-                   lines->begin(), lines->end(),
-                   [&](const XLine& line) { return line.events_size() == 0; }),
-               lines->end());
+  RemoveIf(plane->mutable_lines(),
+           [&](const XLine* line) { return line->events().empty(); });
+}
+
+bool XEventsComparator::operator()(const XEvent* a, const XEvent* b) const {
+  return XEventTimespan(*a) < XEventTimespan(*b);
 }
 
 void SortXPlane(XPlane* plane) {
@@ -155,7 +181,7 @@ void SortXSpace(XSpace* space) {
 // smaller than these value.
 void NormalizeTimestamps(XPlane* plane, uint64 start_time_ns) {
   for (XLine& line : *plane->mutable_lines()) {
-    if (line.timestamp_ns() >= start_time_ns) {
+    if (line.timestamp_ns() >= static_cast<int64>(start_time_ns)) {
       line.set_timestamp_ns(line.timestamp_ns() - start_time_ns);
     }
   }
@@ -232,6 +258,17 @@ uint64 GetStartTimestampNs(const XPlane& plane) {
     plane_timestamp = std::min<int64>(plane_timestamp, line.timestamp_ns());
   }
   return plane_timestamp;
+}
+
+bool IsEmpty(const XSpace& space) {
+  for (const auto& plane : space.planes()) {
+    for (const auto& line : plane.lines()) {
+      if (!line.events().empty()) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace profiler
