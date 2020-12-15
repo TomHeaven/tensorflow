@@ -1,11 +1,8 @@
 /* Copyright 2019 The TensorFlow Authors. All Rights Reserved.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
-
     http://www.apache.org/licenses/LICENSE-2.0
-
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,33 +16,33 @@ limitations under the License.
 #include "grpcpp/server_builder.h"
 #include "tensorflow/core/data/service/dispatcher.grpc.pb.h"
 #include "tensorflow/core/data/service/dispatcher_impl.h"
+#include "tensorflow/core/protobuf/data/experimental/service_config.pb.h"
 
 namespace tensorflow {
 namespace data {
 
 // This class is a wrapper that handles communication for gRPC.
-//
-// Example usage:
-//
-// ::grpc::ServerBuilder builder;
-// // configure builder
-// GrpcDispatcherImpl data_service(&builder);
-// builder.BuildAndStart()
-//
 class GrpcDispatcherImpl : public DispatcherService::Service {
  public:
-  explicit GrpcDispatcherImpl(grpc::ServerBuilder* server_builder,
-                              const std::string& protocol);
+  // Constructs a GrpcDispatcherImpl with the given config, and registers it
+  // with `server_builder`.
+  explicit GrpcDispatcherImpl(const experimental::DispatcherConfig& config,
+                              ::grpc::ServerBuilder& server_builder);
   ~GrpcDispatcherImpl() override {}
 
-#define HANDLER(method)                               \
-  grpc::Status method(grpc::ServerContext* context,   \
-                      const method##Request* request, \
-                      method##Response* response) override;
-  HANDLER(RegisterWorker);
+  Status Start();
+
+#define HANDLER(method)                                 \
+  ::grpc::Status method(::grpc::ServerContext* context, \
+                        const method##Request* request, \
+                        method##Response* response) override;
+  HANDLER(WorkerHeartbeat);
   HANDLER(WorkerUpdate);
+  HANDLER(GetDatasetDef);
+  HANDLER(GetSplit);
   HANDLER(GetOrRegisterDataset);
   HANDLER(CreateJob);
+  HANDLER(ReleaseJobClient);
   HANDLER(GetOrCreateJob);
   HANDLER(GetTasks);
   HANDLER(GetWorkers);
