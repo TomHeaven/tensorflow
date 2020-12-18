@@ -5,6 +5,12 @@
 [![Python](https://img.shields.io/pypi/pyversions/tensorflow.svg?style=plastic)](https://badge.fury.io/py/tensorflow)
 [![PyPI](https://badge.fury.io/py/tensorflow.svg)](https://badge.fury.io/py/tensorflow)
 
+# Tensorflow for macOS with CUDA 
+
+This repo fixes multiple issues that prevent the official Tensorflow from successfully built on macOS with CUDA support since Tensorflow team already drops the official support and my pull request is not accepted yet.
+
+The goal of the repo is to provide the same functions on macOS as on Linux. One exception is that NCCL based distributed GPU training based is confirmed not possible on macOS.
+
 
 **`Documentation`** |
 ------------------- |
